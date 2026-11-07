@@ -167,6 +167,8 @@ export class GameScene extends Phaser.Scene {
   rtt = 100;
   /** 내 예측 위치 기록 (지연만큼 과거의 내 위치와 서버 위치를 비교하려고) */
   private hist: { t: number; x: number; y: number }[] = [];
+  /** 내가 화면에서 먼저 낸 대시 시각들 (서버 소식이 늦게 와도 '내 대시'로 알아보려고) */
+  private dashAt: number[] = [];
   private players = new Map<number, PlayerView>();
   private monsters = new Map<number, MonsterView>();
   private projs = new Map<number, Phaser.GameObjects.Image>();
@@ -506,7 +508,12 @@ export class GameScene extends Phaser.Scene {
     this.inputState.dashSeq++;
     this.sendDirty = true;
     const me = this.latest()?.players.find((p) => p.id === this.myId);
-    if (me && !me.ghost && me.dc > 0 && this.local.dashT <= 0) {
+    // 서버의 남은 대시 수는 핑만큼 늦게 오므로, 아직 반영 안 된 내 대시만큼 빼고 판단
+    const now = performance.now();
+    this.dashAt = this.dashAt.filter((t) => now - t < this.rtt + 400);
+    const pending = this.dashAt.filter((t) => now - t < this.rtt + 120).length;
+    if (me && !me.ghost && me.dc - pending > 0 && this.local.dashT <= 0) {
+      this.dashAt.push(now);
       const { mx, my } = this.moveDir(me.rev);
       const len = Math.hypot(mx, my);
       this.local.dashT = DASH_TIME;
@@ -596,7 +603,9 @@ export class GameScene extends Phaser.Scene {
       const when = recvAt - this.rtt;
       let past = this.hist[0];
       for (const h of this.hist) { if (h.t <= when) past = h; else break; }
-      const serverDash = meSnap.dash && this.local.dashT <= 0;
+      // 내가 낸 대시가 늦게 서버 소식으로 온 건 '서버가 시킨 돌진'(방패 돌진 등)이 아님 → 끌어당기지 않음
+      const myDashEcho = this.dashAt.some((t) => nowT - t < this.rtt + DASH_TIME * 1000 + 200);
+      const serverDash = meSnap.dash && this.local.dashT <= 0 && !myDashEcho;
       // 서버 쪽 돌진(방패 돌진 등)은 지금 위치를 서버 위치로 빠르게 맞춤
       const ex = meSnap.x - (serverDash ? this.local.x : past.x);
       const ey = meSnap.y - (serverDash ? this.local.y : past.y);
