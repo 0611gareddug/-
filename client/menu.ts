@@ -357,7 +357,7 @@ const BOSS_DESC: Record<string, string> = {
 const EFFECT_DESC: Record<string, string> = { slow: "둔화", poison: "독", burn: "화상" };
 
 function worldsOf(def: MonsterDef) {
-  return WORLDS.filter((w) => w.monsters.includes(def.id) || w.boss === def.id).map((w) => `${w.id} ${w.name}`);
+  return WORLDS.filter((w) => w.monsters.includes(def.id) || w.extra === def.id || w.boss === def.id).map((w) => `${w.id} ${w.name}`);
 }
 
 function codexMonsters(body: HTMLElement) {

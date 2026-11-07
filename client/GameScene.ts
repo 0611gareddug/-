@@ -74,6 +74,21 @@ export class GameScene extends Phaser.Scene {
     this.comboEls.clear();
   }
 
+  /** v1.4 회전 칼날 (서버와 같은 각도 공식) */
+  private orbitImgs = new Map<number, Phaser.GameObjects.Image[]>();
+  private drawOrbit(p: SnapPlayer, x: number, y: number, _now: number) {
+    const n = p.ghost ? 0 : p.ob ?? 0;
+    let imgs = this.orbitImgs.get(p.id) ?? [];
+    while (imgs.length < n) imgs.push(this.add.image(x, y, "proj_shuriken").setScale(1.4));
+    while (imgs.length > n) imgs.pop()!.destroy();
+    this.orbitImgs.set(p.id, imgs);
+    const st = this.latest()?.time ?? 0;
+    imgs.forEach((im, i) => {
+      const a = st * 4 + (i / n) * Math.PI * 2;
+      im.setPosition(Math.round(x + Math.cos(a) * 26), Math.round(y - 4 + Math.sin(a) * 26)).setRotation(a * 3).setDepth(y + 20);
+    });
+  }
+
   /** 연속 처치 콤보: 머리 위 (HTML, 3콤보부터) */
   private comboEls = new Map<number, HTMLDivElement>();
   private drawCombo(p: SnapPlayer, x: number, y: number) {
@@ -320,6 +335,8 @@ export class GameScene extends Phaser.Scene {
     this.players.clear();
     this.monsters.clear();
     this.clearBubbles();
+    for (const list of this.orbitImgs.values()) for (const im of list) im.destroy();
+    this.orbitImgs.clear();
     for (const o of this.fxObjs) { this.tweens.killTweensOf(o); o.destroy(); }
     this.fxObjs.clear();
     this.snaps = [];
@@ -1012,6 +1029,8 @@ export class GameScene extends Phaser.Scene {
     // 연결 끊긴 사람: 머리 위에 깜빡이는 "연결끊김!" + 반투명
     v.off.setVisible(!!p.off && Math.floor(now / 400) % 2 === 0);
     v.root.setAlpha(p.off ? 0.55 : 1);
+    // v1.4 카드 '회전 칼날'
+    this.drawOrbit(p, x, y, now);
     // 채팅 말풍선 (머리 위 4.5초, HTML)
     this.drawCombo(p, x, y);
     this.drawBubble(p, x, y);
@@ -1218,6 +1237,37 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: c, scale: 1, alpha: 0, duration: life, ease: "Quad.easeOut", onComplete: () => c.destroy() });
   }
 
+  /** v1.4 피해 숫자: 저해상도 캔버스 대신 HTML로 또렷하게. 너무 많으면 작은 숫자는 생략 */
+  private dmgNum(x: number, y: number, v: number, kind: "hit" | "crit" | "big") {
+    const box = document.getElementById("chat-bubbles");
+    if (!box) return;
+    if (kind === "hit" && box.childElementCount > 70) return;
+    const s = this.toScreen(x + (Math.random() * 10 - 5), y - 10 - Math.random() * 4);
+    const el = document.createElement("div");
+    el.className = `dmg-num ${kind}`;
+    el.textContent = kind === "crit" ? `${v}!` : String(v);
+    el.style.left = `${Math.round(s.x)}px`;
+    el.style.top = `${Math.round(s.y)}px`;
+    el.addEventListener("animationend", () => el.remove());
+    box.append(el);
+  }
+
+  /** v1.4 번쩍 원 (폭발·스킬이 더 화려하게) */
+  private flashCircle(x: number, y: number, r: number, color: number, life = 160) {
+    if (settings.potato) return;
+    const c = this.track(this.add.circle(x, y, r, color, 0.55).setDepth(y + 30).setBlendMode(Phaser.BlendModes.ADD));
+    this.tweens.add({ targets: c, alpha: 0, scale: 1.25, duration: life, ease: "Quad.easeOut", onComplete: () => c.destroy() });
+  }
+
+  /** v1.4 보스 연출용 큰 글자 (HTML) */
+  private bigBanner(text: string, cls: string) {
+    const el = document.createElement("div");
+    el.className = `fx-banner ${cls}`;
+    el.textContent = text;
+    el.addEventListener("animationend", () => el.remove());
+    document.body.append(el);
+  }
+
   private floatText(x: number, y: number, text: string, color: string, life = 700) {
     const t = this.track(this.add.text(x, y, text, { ...TEXT_STYLE, color }).setOrigin(0.5, 1).setDepth(99999));
     this.tweens.add({ targets: t, y: y - 14, alpha: 0, duration: life, ease: "Quad.easeOut", onComplete: () => t.destroy() });
@@ -1245,14 +1295,15 @@ export class GameScene extends Phaser.Scene {
     this.fxSound(f.k);
     if (settings.potato) {
       // 감자 모드: 소리와 숫자만 (파티클·고리·잔상·멈칫·흔들림 없음)
-      if (f.k === "num") this.floatText(f.x, f.y, `${f.r}`, "#ffffff", 600);
-      else if (f.k === "crit" && f.r) this.floatText(f.x, f.y - 6, `${f.r}!`, "#f8e070");
+      if (f.k === "num") this.dmgNum(f.x, f.y, f.r ?? 0, "hit");
+      else if (f.k === "crit" && f.r) this.dmgNum(f.x, f.y, f.r, "crit");
       return;
     }
     switch (f.k) {
       case "hit":
         this.pixelBurst(f.x, f.y - 4, 3, [0xffffff, 0xfff0a0], 7, 180);
         this.punchAt(f.x, f.y);
+        if (f.r) this.dmgNum(f.x, f.y, f.r, f.r >= 60 ? "big" : "hit");
         break;
       case "crit":
         this.pixelBurst(f.x, f.y - 4, 5, [0xf8e070, 0xffffff], 10, 240);
@@ -1260,17 +1311,21 @@ export class GameScene extends Phaser.Scene {
         // 타격감: 치명타는 살짝 멈칫 + 흔들림
         this.hitStopUntil = Math.max(this.hitStopUntil, performance.now() + 45);
         this.shake(80, 0.003);
-        if (f.r) this.floatText(f.x + (Math.random() * 8 - 4), f.y - 6, `${f.r}!`, "#f8e070");
+        this.flashCircle(f.x, f.y - 4, 7, 0xffe080, 120);
+        if (f.r) this.dmgNum(f.x, f.y, f.r, "crit");
         break;
       case "num":
-        this.floatText(f.x + (Math.random() * 10 - 5), f.y, `${f.r}`, "#ffffff", 600);
+        this.dmgNum(f.x, f.y, f.r ?? 0, "hit");
         break;
       case "die":
         this.pixelBurst(f.x, f.y - 3, 10, [0x4fc06a, 0xc8f8d0, 0xffffff], 14 + (f.r ?? 6), 380);
         if ((f.r ?? 0) >= 14) {
           // 보스 처치: 크게 멈칫 + 크게 흔들림
-          this.hitStopUntil = Math.max(this.hitStopUntil, performance.now() + 160);
-          this.shake(400, 0.012);
+          this.hitStopUntil = Math.max(this.hitStopUntil, performance.now() + 220);
+          this.shake(500, 0.014);
+          this.cameras.main.flash(450, 255, 255, 255);
+          this.pixelBurst(f.x, f.y - 10, 40, [0xffffff, 0xf8e070, 0xf08030], 70, 900);
+          this.bigBanner("격파!", "down");
         } else {
           this.shake(50, 0.0015);
         }
@@ -1288,13 +1343,29 @@ export class GameScene extends Phaser.Scene {
         this.ring(f.x, f.y - 3, f.r ?? 28, 0xffffff, 220);
         break;
       case "boom":
+        this.flashCircle(f.x, f.y, (f.r ?? 18) * 0.7, 0xffe0a0, 140);
         this.ring(f.x, f.y, f.r ?? 18, 0xf08030, 300, true);
-        this.pixelBurst(f.x, f.y, 10, [0xf8c040, 0xf08030, 0xffffff], f.r ?? 18, 350);
+        this.pixelBurst(f.x, f.y, 16, [0xf8c040, 0xf08030, 0xffffff, 0xff6030], f.r ?? 18, 420);
         if ((f.r ?? 0) > 40) this.shake(120, 0.006);
         break;
       case "heal":
+        this.flashCircle(f.x, f.y, (f.r ?? 60) * 0.5, 0x80ffb0, 260);
         this.ring(f.x, f.y, f.r ?? 60, 0x50e080, 450, true);
-        this.pixelBurst(f.x, f.y, 14, [0x50e080, 0xc8ffd8], f.r ?? 60, 500);
+        this.pixelBurst(f.x, f.y, 22, [0x50e080, 0xc8ffd8, 0xffffff], f.r ?? 60, 650);
+        break;
+      case "frost":
+        // v1.4 서리 대시
+        this.flashCircle(f.x, f.y, (f.r ?? 36) * 0.6, 0xa0e0ff, 200);
+        this.ring(f.x, f.y, f.r ?? 36, 0x80d0ff, 350, true);
+        this.pixelBurst(f.x, f.y, 14, [0xffffff, 0xa0e0ff, 0x60a0ff], f.r ?? 36, 450);
+        break;
+      case "rage":
+        // v1.4 보스 광폭화: 붉은 번쩍 + 충격파 + 큰 글자
+        this.cameras.main.flash(500, 255, 40, 40);
+        this.shake(450, 0.01);
+        this.ring(f.x, f.y, f.r ?? 80, 0xff3030, 600);
+        this.ring(f.x, f.y, (f.r ?? 80) * 1.6, 0xff6030, 800);
+        this.pixelBurst(f.x, f.y - 10, 30, [0xff3030, 0xff9030, 0xffffff], 60, 800);
         break;
       case "taunt":
         this.ring(f.x, f.y, f.r ?? 90, 0xe84a4a, 400);

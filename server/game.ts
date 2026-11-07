@@ -47,6 +47,9 @@ export interface Player extends Participant {
   droneT?: number;
   /** 닌자 천벌 돌진 (무적 + 보스 빼고 즉사) */
   lethalDash?: boolean;
+  /** v1.4 카드: 회전 칼날이 마지막으로 때린 시각 / 유성 소환 타이머 */
+  orbitHit?: Map<number, number>;
+  meteorT?: number;
   /** 연속 처치 콤보 (2.5초 안에 다음 처치) */
   combo?: number;
   comboT?: number;
@@ -142,6 +145,12 @@ export interface Monster {
   /** 네크로맨서 저주: 받는 피해 +30% (사신의 손길이면 +50%) */
   curseT?: number;
   curseBoost?: boolean;
+  /** v1.4 보스 고유 패턴: 점프 착지 · 모래 벽 */
+  jumpT?: number;
+  jumpX?: number;
+  jumpY?: number;
+  wallN?: number;
+  wallT?: number;
   /** v1.0 새 패턴: 자폭 심지 · 바라보는 방향 · 연속 사격 · 나선 탄막 · 소환한 주인 · 광폭화 연출 */
   fuseT?: number;
   faceA?: number;
@@ -290,6 +299,8 @@ export function skillCd(base: number, s: Stats, slot = -1) {
   return Math.max(base * 0.4, base * s.skillCdMul - s.skillCdFlat - (s.slotCd[slot] ?? 0));
 }
 
+/** v1.4 보스 등장 컷씬 길이 (초) */
+const BOSS_INTRO = 3.2;
 /** v1.0: 특성 트리가 있는 모드의 기본 피해 너프 (평타 -10%, 스킬 합계 -15%) */
 const BASIC_NERF = 0.9;
 const SKILL_NERF = 0.85;
@@ -354,6 +365,8 @@ export class Game {
   private gemMode = false;
   /** 무한 하강 */
   private descent = false;
+  /** v1.4 보스 등장 컷씬 남은 시간 (이동·전투 멈춤) */
+  private introT = 0;
   /** v1.0 특성 트리 사용 여부 */
   talentsOn = false;
   private shattering = false;
@@ -905,16 +918,24 @@ export class Game {
         const second = r >= 2 ? Math.round((r - 1) * 1.5) : 0;
         for (let k = 0; k < Math.round(main * countMul); k++) this.spawnMonster(wd.monsters[0]);
         for (let k = 0; k < Math.round(second * countMul); k++) this.spawnMonster(wd.monsters[1]);
+        // v1.4 월드별 세 번째 잡몹 (들쥐는 떼로)
+        const third = Math.round((r >= 2 ? 1 + r * 0.6 : 0.6) * countMul) * (wd.extra === "field_rat" ? 2 : 1);
+        for (let k = 0; k < third; k++) this.spawnMonster(wd.extra);
         // v1.0 특수 몬스터 (자폭 · 방패 · 소환 · 탄막)
         const specials = specialMonsters(this.world);
         for (let k = 0; k < Math.round((0.5 + r * 0.25) * countMul); k++) this.spawnMonster(pick(specials));
         // 엘리트: 15% (3라운드부터 25%)
-        if (Math.random() < (r >= 3 ? 0.25 : 0.15)) this.spawnMonster(pick([...wd.monsters]), undefined, this.randomElite());
+        if (Math.random() < (r >= 3 ? 0.25 : 0.15)) this.spawnMonster(pick([...wd.monsters, wd.extra]), undefined, this.randomElite());
         // 변형 규칙 '엘리트 대량 출몰': 엘리트 3마리 추가
         if (this.mod === "elite") for (let k = 0; k < 3; k++) this.spawnMonster(pick([...wd.monsters]), undefined, this.randomElite());
       } else {
         const boss = this.spawnMonster(wd.boss);
-        if (boss) this.title(boss.def.name, kind === "boss" && this.panic ? "최종 구역 — 시간 안에 쓰러뜨려요!" : `${wd.name}의 주인이 나타났다!`, "#ff7040");
+        if (boss && this.panic) this.title(boss.def.name, "최종 구역 — 시간 안에 쓰러뜨려요!", "#ff7040");
+        else if (boss) {
+          // v1.4 보스 등장 컷씬 (VS 화면) 동안 잠깐 멈춤
+          this.introT = BOSS_INTRO;
+          this.broadcast({ t: "bossIntro", boss: boss.kind, world: this.world, time: BOSS_INTRO });
+        }
       }
       if (this.team.treasure) this.spawnMonster("chest");
       if (this.panic) this.setupPanicZone();
@@ -1990,6 +2011,12 @@ export class Game {
       this.updateGimmick();
     }
 
+    if (this.introT > 0) {
+      // 보스 컷씬: 화면만 보내고 멈춤
+      this.introT -= DT;
+      this.sendSnapshot();
+      return;
+    }
     for (const p of this.players.values()) this.updatePlayer(p);
     if (this.gemMode) this.syncProxies();
     this.updatePets();
@@ -2118,6 +2145,7 @@ export class Game {
     if (p.songFastT) p.songFastT = Math.max(0, p.songFastT - DT);
     if (p.ghost && this.phase === "play") p.ghostTime = (p.ghostTime ?? 0) + DT;
     if (p.comboT) { p.comboT = Math.max(0, p.comboT - DT); if (!p.comboT) p.combo = 0; }
+    if (!p.ghost && this.phase === "play") this.updateCardFx(p);
     if (p.regenT) {
       // 성직자 특성 '은총': 초당 체력 5% 회복
       p.regenT = Math.max(0, p.regenT - DT);
@@ -2224,6 +2252,15 @@ export class Game {
       if (p.dashLeft > 0 && p.dashT <= 0) {
         if (p.dashLeft === p.stats.dashCharges) p.dashRecharge = DASH_COOLDOWN * p.stats.dashCdMul;
         p.dashLeft--;
+        if (p.stats.frostDash) {
+          // 카드 '서리 대시'
+          this.fx.push({ k: "frost", x: Math.round(p.x), y: Math.round(p.y), r: 36 });
+          for (const m of this.monsters) {
+            if (m.spawnT > 0 || m.kind === "chest" || m.kind === "pvp" || Math.hypot(m.x - p.x, m.y - p.y) > 36 + m.r) continue;
+            m.slowT = Math.max(m.slowT, 2);
+            this.dealDamage(m, 8, p, { raw: false, noCrit: true });
+          }
+        }
         this.startDash(p, len > 0 ? mx : Math.cos(p.aim), len > 0 ? my : Math.sin(p.aim), DASH_TIME, DASH_SPEED, false);
       }
     }
@@ -2654,6 +2691,7 @@ export class Game {
         // 광폭화 순간: 경고 + 나선 탄막 + 지진
         m.enrageDone = true;
         this.title("광폭화!", `${def.name}이(가) 화났어요`, "#ff4a4a");
+        this.fx.push({ k: "rage", x: Math.round(m.x), y: Math.round(m.y), r: 80 });
         this.bossAbility(m, "spiral", target, true);
         this.bossAbility(m, "quake", target, true);
         m.abilityCd = 3;
@@ -2843,6 +2881,102 @@ export class Game {
         m.burstN = enraged ? 5 : 3;
         m.burstT = 0.3;
         break;
+      // ---------- v1.4 보스 고유 패턴 ----------
+      case "bounce": {
+        // 왕 슬라임: 대상 위치로 크게 점프 → 착지 충격 + 꼬마 슬라임
+        const tx = target.x, ty = target.y;
+        if (isWallAt(this.map, tx, ty)) break;
+        this.addZone("slam", tx, ty, 54, m.id, m.dmg * 1.6, 1.1);
+        m.jumpT = 1.1; m.jumpX = tx; m.jumpY = ty;
+        m.busyT = 1.3;
+        break;
+      }
+      case "sandwall": {
+        // 파라오: 틈이 하나 있는 모래 벽이 밀려옴 (2번)
+        m.wallN = enraged ? 3 : 2;
+        m.wallT = 0;
+        m.busyT = 1.2;
+        break;
+      }
+      case "avalanche": {
+        // 예티: 대상 방향 3갈래로 눈사태가 굴러옴 (차례로 터지는 충격파)
+        const a0 = Math.atan2(target.y - m.y, target.x - m.x);
+        m.busyT = 1;
+        for (const off of [-0.4, 0, 0.4]) {
+          for (let i = 1; i <= 9; i++) {
+            const x = m.x + Math.cos(a0 + off) * (20 + i * 22), y = m.y + Math.sin(a0 + off) * (20 + i * 22);
+            if (isWallAt(this.map, x, y)) break;
+            this.addZone("slam", x, y, 18, m.id, m.dmg * 1.1, 0.7 + i * 0.1);
+          }
+        }
+        break;
+      }
+      case "garden": {
+        // 식인꽃 여왕: 바둑판 가시밭 2번 (첫 번째와 두 번째의 안전한 칸이 반대)
+        m.busyT = 1.2;
+        for (let gx = -3; gx <= 3; gx++) {
+          for (let gy = -3; gy <= 3; gy++) {
+            const x = m.x + gx * 40, y = m.y + gy * 40;
+            if (isWallAt(this.map, x, y) || Math.hypot(gx, gy) > 3.3) continue;
+            this.addZone("strike", x, y, 20, m.id, m.dmg * 1.1, (gx + gy) % 2 === 0 ? 1.1 : 2);
+          }
+        }
+        break;
+      }
+      case "boltline": {
+        // 천둥 독수리: 보스 → 각 용사 방향으로 번개 줄기
+        m.busyT = 0.9;
+        const alive = [...this.players.values()].filter((p) => !p.ghost && !p.dc).slice(0, 4);
+        for (const p of alive) {
+          const a = Math.atan2(p.y - m.y, p.x - m.x);
+          for (let i = 1; i <= 12; i++) {
+            const x = m.x + Math.cos(a) * i * 24, y = m.y + Math.sin(a) * i * 24;
+            if (isWallAt(this.map, x, y)) break;
+            this.addZone("strike", x, y, 14, m.id, m.dmg * 1.2, 0.85 + i * 0.03);
+          }
+        }
+        break;
+      }
+      case "hellfire": {
+        // 마왕: 용사들 주변에 불벼락 두 번
+        m.busyT = 1;
+        for (const p of [...this.players.values()].filter((q) => !q.ghost)) {
+          for (let k = 0; k < (enraged ? 4 : 3); k++) {
+            const x = p.x + (Math.random() - 0.5) * 110, y = p.y + (Math.random() - 0.5) * 110;
+            if (!isWallAt(this.map, x, y)) this.addZone("strike", x, y, 24, m.id, m.dmg * 1.3, k % 2 ? 1.6 : 1);
+          }
+        }
+        break;
+      }
+      case "phantom": {
+        // 유령 선장: 유령 4마리가 둘러싼 뒤 동시에 돌진
+        m.busyT = 0.8;
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2;
+          const pos = { x: target.x + Math.cos(a) * 70, y: target.y + Math.sin(a) * 70 };
+          if (isWallAt(this.map, pos.x, pos.y)) continue;
+          const g = this.spawnMonster("ghost", pos);
+          if (!g) continue;
+          g.spawnT = 0.3;
+          g.summonBy = m.id;
+          g.xp *= 0.3; g.gold = 0;
+          g.windT = 0.9;
+          g.rushA = Math.atan2(target.y - pos.y, target.x - pos.x);
+          g.rushSpeed = 210;
+        }
+        break;
+      }
+      case "judgment": {
+        // 장난꾸러기 신: 대상 위로 거대한 십자 → X자 심판
+        m.busyT = 1.2;
+        for (const [ang, delay] of [[0, 1.1], [Math.PI / 2, 1.1], [Math.PI / 4, 1.9], [-Math.PI / 4, 1.9]] as const) {
+          for (let i = -8; i <= 8; i++) {
+            const x = target.x + Math.cos(ang) * i * 24, y = target.y + Math.sin(ang) * i * 24;
+            if (!isWallAt(this.map, x, y)) this.addZone("strike", x, y, 13, m.id, m.dmg * 1.3, delay);
+          }
+        }
+        break;
+      }
       case "spiral":
         // 나선 탄막 2.5초
         m.spiralT = 2.5;
@@ -2862,10 +2996,76 @@ export class Game {
     }
   }
 
+  /** v1.4 카드 효과: 회전 칼날 · 유성 소환 */
+  private updateCardFx(p: Player) {
+    if (p.stats.orbit > 0) {
+      const n = p.stats.orbit;
+      p.orbitHit ??= new Map();
+      const base = this.time * 4;
+      for (let i = 0; i < n; i++) {
+        const a = base + (i / n) * Math.PI * 2;
+        const bx = p.x + Math.cos(a) * 26, by = p.y + Math.sin(a) * 26;
+        for (const m of this.nearMonsters(bx, by, 16, this.nearBuf).slice()) {
+          if (m.spawnT > 0 || m.kind === "chest" || m.kind === "pvp" || m.hp <= 0) continue;
+          if (Math.hypot(m.x - bx, m.y - by) > 7 + m.r) continue;
+          const last = p.orbitHit.get(m.id) ?? -9;
+          if (this.time - last < 0.4) continue;
+          p.orbitHit.set(m.id, this.time);
+          this.dealDamage(m, CLASSES[p.cls].attack.dmg * 0.35, p, { noCrit: true });
+        }
+      }
+      if (p.orbitHit.size > 200) p.orbitHit.clear();
+    }
+    if (p.stats.meteorRain) {
+      p.meteorT = (p.meteorT ?? 4) - DT;
+      if (p.meteorT <= 0) {
+        p.meteorT = 4;
+        let best: Monster | null = null;
+        let bd = 220;
+        for (const m of this.monsters) {
+          if (m.spawnT > 0 || m.kind === "chest" || m.kind === "pvp" || m.kind === "dummy") continue;
+          const d = Math.hypot(m.x - p.x, m.y - p.y);
+          if (d < bd) { bd = d; best = m; }
+        }
+        if (best) this.addZone("meteor", best.x, best.y, 30, p.id, 22, 0.7);
+      }
+    }
+  }
+
   /** 보스 연속 사격 · 나선 탄막 진행 */
   private updateVolleys(m: Monster, target: Player) {
     const pk = m.def.proj?.kind ?? "spirit";
     const eff = m.def.proj?.effect;
+    if (m.jumpT !== undefined) {
+      // 왕 슬라임 점프 착지
+      m.jumpT -= DT;
+      if (m.jumpT <= 0) {
+        m.x = m.jumpX ?? m.x; m.y = m.jumpY ?? m.y;
+        m.jumpT = undefined;
+        this.fx.push({ k: "boom", x: Math.round(m.x), y: Math.round(m.y), r: 54 });
+        if (this.monsters.filter((o) => o.kind === "slime").length < 12) {
+          for (let k = 0; k < 2; k++) this.spawnMonster("slime", { x: m.x + (k ? 24 : -24), y: m.y });
+        }
+      }
+    }
+    if (m.wallN && m.wallN > 0) {
+      m.wallT = (m.wallT ?? 0) - DT;
+      if (m.wallT <= 0) {
+        m.wallT = 0.9;
+        m.wallN--;
+        // 대상 쪽으로 밀려오는 모래 벽 (빈틈 1곳)
+        const a = Math.atan2(target.y - m.y, target.x - m.x);
+        const px = -Math.sin(a), py = Math.cos(a);
+        const gap = Math.floor(Math.random() * 9) - 4;
+        for (let i = -7; i <= 7; i++) {
+          if (Math.abs(i - gap) <= 1) continue;
+          const sx = m.x + px * i * 13, sy = m.y + py * i * 13;
+          this.monsterShot(m, a, pk, 70, eff);
+          const pr = this.projs[this.projs.length - 1];
+          pr.x = sx; pr.y = sy; pr.life = 4;
+        }
+      }
+    }
     if (m.burstN && m.burstN > 0) {
       m.burstT = (m.burstT ?? 0) - DT;
       if (m.burstT <= 0) {
@@ -3193,6 +3393,8 @@ export class Game {
     const frozen = m.frozenT > 0;
     const cursed = (m.curseT ?? 0) > 0;
     this.hurtMonster(m, dmg, p, crit);
+    // 카드 '치명 폭발': 평타 치명타 → 작은 폭발 (스킬 피해라 다시 터지지 않음)
+    if (crit && !o.skill && p.stats.critBoom && m.kind !== "dummy") this.explode(m.x, m.y, 22, base * 0.5, p, true, m.id);
     // 네크로 특성 '피의 계약': 저주받은 적을 때리면 8% 회복
     if (cursed && !p.ghost && tier(p.tal, "x_leech") >= 5) p.hp = Math.min(p.stats.maxHp, p.hp + dmg * 0.08);
     // 마법사 특성 '얼음 파편': 빙결된 적이 깨지며 주변 폭발
@@ -3262,12 +3464,23 @@ export class Game {
     p.dmgDealt += dealt;
     p.idleT = 0;
     if (p.stats.lifesteal > 0 && !p.ghost) p.hp = Math.min(p.stats.maxHp, p.hp + dealt * p.stats.lifesteal);
-    this.fx.push({ k: crit ? "crit" : "hit", x: Math.round(m.x), y: Math.round(m.y), r: crit ? Math.round(dmg) : undefined });
+    this.fx.push({ k: crit ? "crit" : "hit", x: Math.round(m.x), y: Math.round(m.y), r: Math.max(1, Math.round(dmg)) });
     if (m.hp <= 0) this.killMonster(m, p);
   }
 
   private killMonster(m: Monster, killer: Player) {
     this.monsters = this.monsters.filter((o) => o !== m);
+    if (killer.stats.killZap) {
+      // 카드 '처치 번개': 주변 3명에게 번개
+      const near = this.monsters
+        .filter((o) => o.spawnT <= 0 && o.kind !== "chest" && o.kind !== "pvp" && o.kind !== "dummy" && Math.hypot(o.x - m.x, o.y - m.y) < 80)
+        .slice(0, 3);
+      if (near.length) {
+        const dmg = CLASSES[killer.cls].attack.dmg * 0.7;
+        this.fx.push({ k: "zap", x: Math.round(m.x), y: Math.round(m.y), pts: near.flatMap((o) => [Math.round(o.x), Math.round(o.y)]) });
+        for (const o of near) this.dealDamage(o, dmg, killer, { noCrit: true });
+      }
+    }
     killer.combo = (killer.comboT ?? 0) > 0 ? (killer.combo ?? 0) + 1 : 1;
     killer.comboT = 2.5;
     const necro = (m.curseT ?? 0) > 0 && m.curseBy !== undefined ? this.players.get(m.curseBy) : undefined;
@@ -3461,7 +3674,7 @@ export class Game {
           lv: p.level, xp: Math.floor(p.xp), xpn: xpToNext(p.level), gold: p.gold,
           shield: Math.ceil(p.shield), giant: p.giantT > 0,
           size: Math.round(p.stats.sizeMul * (p.giantT > 0 ? 2 : 1) * 100) / 100,
-          rev: this.reversed(p), shake: !!p.stats.aimShake, ps, god: p.god || undefined, song: p.songOn || undefined, cb: (p.combo ?? 0) >= 3 ? p.combo : undefined, off: p.dc || undefined, spec: p.spec || undefined,
+          rev: this.reversed(p), shake: !!p.stats.aimShake, ps, god: p.god || undefined, song: p.songOn || undefined, ob: p.stats.orbit || undefined, cb: (p.combo ?? 0) >= 3 ? p.combo : undefined, off: p.dc || undefined, spec: p.spec || undefined,
           cos: this.changed(this.sentCos, p.id, JSON.stringify(p.cos ?? {}), full) ? (p.cos ?? {}) : undefined,
           cards: this.changed(this.sentCards, p.id, p.cards.join(","), full) ? p.cards : undefined,
         };

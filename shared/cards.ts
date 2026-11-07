@@ -79,6 +79,12 @@ export interface Stats {
   curseBoost: number;
   /** v1.0 특성: 스킬 칸별 쿨타임 -N초 */
   slotCd: number[];
+  /** v1.4 새 카드: 회전 칼날 수 · 치명 폭발 · 유성 소환 · 서리 대시 · 처치 번개 */
+  orbit: number;
+  critBoom: number;
+  meteorRain: number;
+  frostDash: number;
+  killZap: number;
 }
 
 export function baseStats(maxHp: number): Stats {
@@ -94,6 +100,7 @@ export function baseStats(maxHp: number): Stats {
     chargeBoost: 0, tauntBoost: 0, rainBoost: 0, sniper: 0, twinMeteor: 0, manaSurge: 0, blessLight: 0, doubleShield: 0,
     turretBonus: 0, napalm: 0, bigPot: 0, chef: 0, loud: 0, echo: 0, moody: 0,
     baseAtk: 10, baseSpeed: 70, baseAtkCd: 0.45, skillFlat: 0, skillCdFlat: 0, dmgFlatReduce: 0, goldFlat: 0, areaFlat: 0, shurikenPlus: 0, assassin: 0, curseExt: 0, curseBoost: 0, slotCd: [0, 0, 0, 0],
+    orbit: 0, critBoom: 0, meteorRain: 0, frostDash: 0, killZap: 0,
   };
 }
 
@@ -210,6 +217,13 @@ export const CARDS: CardDef[] = [
   card({ id: "x_plague", cls: "necro", name: "끈질긴 저주", rarity: "rare", desc: "저주 지속 시간 +2초", quote: "쉽게는 안 풀려", apply: (s) => { s.curseExt = 2; } }),
   card({ id: "x_reaper", cls: "necro", name: "사신의 손길", rarity: "legend", desc: "저주받은 적이 받는 피해 +30% → +50%", quote: "이름을 불렀다", apply: (s) => { s.curseBoost = 1; } }),
   card({ id: "b_echo", cls: "bard", name: "메아리", rarity: "legend", desc: "음표가 2번 더 튕김", quote: "메아리~ 아리~", apply: (s) => { s.echo = 1; } }),
+
+  // ---------- v1.4 현란한 카드 (5) ----------
+  card({ id: "orbit", name: "회전 칼날", rarity: "rare", stack: true, desc: "내 주위를 도는 칼날 +2개 (닿은 적에게 평타의 35% 피해, 최대 2장)", quote: "가까이 오지 마", apply: (s) => { s.orbit = Math.min(4, s.orbit + 2); } }),
+  card({ id: "critboom", name: "치명 폭발", rarity: "rare", desc: "평타 치명타가 터지면 작은 폭발 (주변에 평타의 50%)", quote: "빵! 하고 터짐", apply: (s) => { s.critBoom = 1; } }),
+  card({ id: "meteorrain", name: "유성 소환", rarity: "legend", desc: "4초마다 가까운 적에게 유성이 떨어짐 (피해 22)", quote: "하늘이 도와줌", apply: (s) => { s.meteorRain = 1; } }),
+  card({ id: "frostdash", name: "서리 대시", rarity: "rare", desc: "대시하면 주변 적 2초 둔화 + 피해 8", quote: "시원하게 지나감", apply: (s) => { s.frostDash = 1; } }),
+  card({ id: "killzap", name: "처치 번개", rarity: "legend", desc: "적을 처치하면 주변 적 3명에게 번개 (평타의 70%)", quote: "다음은 너다", apply: (s) => { s.killZap = 1; } }),
 
   // ---------- 스킬 연동 (5) ----------
   card({ id: "skillmania", name: "스킬 마니아", rarity: "common", stack: true, desc: "스킬 피해 +3 (한 번 맞을 때마다)", quote: "평타는 촌스러워", apply: (s) => { s.skillFlat += 3; } }),

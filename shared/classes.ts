@@ -55,7 +55,6 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     group: "melee",
     // v0.9: 체력 140→170, 받는 피해 -15%
     hp: 170,
-    dmgTaken: 0.85,
     speed: 72,
     // v0.7: 피해 소폭↑ · 베기 범위 대폭↑ · 이속 소폭↑
     attack: { kind: "melee", dmg: 16, cd: 0.45, range: 36 },
@@ -138,7 +137,6 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     group: "melee",
     // v0.9: 체력 120→150, 받는 피해 -15%
     hp: 150,
-    dmgTaken: 0.85,
     speed: 70,
     // 프라이팬: 가끔 적을 기절시킴
     // v0.9.1: 평타 범위 22→30
@@ -173,7 +171,6 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     group: "melee",
     hp: 120,
     speed: 80,
-    dmgTaken: 0.85,
     // 빠른 단검 베기
     attack: { kind: "melee", dmg: 8, cd: 0.28, range: 24 },
     skills: [

@@ -16,7 +16,7 @@ import { initGuard } from "./guard";
 import { panicComplete, panicEnd, panicReset, panicSnap, panicStage } from "./panic";
 import { closeModeSelect, initModeSelect, isModeSelectOpen, miniBanner, modeIdOf, openModeSelect } from "./modeSelect";
 import { Net } from "./net";
-import { heroPalette, heroRows, paint } from "./sprites";
+import { BODIES, heroPalette, heroRows, monsterPalette, paint } from "./sprites";
 import { paintCard } from "./cardArt";
 import { TALENTS, TALENT_TIERS, tier } from "../shared/talents";
 
@@ -102,6 +102,10 @@ function cardEl(id: string, num?: number): HTMLElement {
   const c = CARD_BY_ID[id];
   const el = document.createElement("div");
   el.className = `card r-${c.rarity}`;
+  // v1.4: 희귀도별 반짝임 (희귀=빛줄기, 전설=무지개 홀로그램)
+  const shine = document.createElement("div");
+  shine.className = "shine";
+  el.append(shine);
   const icon = document.createElement("div");
   icon.className = "icon";
   icon.append(cardIcon(id, 56));
@@ -115,6 +119,23 @@ function cardEl(id: string, num?: number): HTMLElement {
     el.append(d);
   }
   return el;
+}
+
+/** v1.4 카드 고를 때 터지는 빛 조각 */
+function cardBurst(x: number, y: number, color: string) {
+  for (let k = 0; k < 18; k++) {
+    const d = document.createElement("div");
+    d.className = "card-spark";
+    const a = (k / 18) * Math.PI * 2 + Math.random() * 0.3;
+    const dist = 70 + Math.random() * 60;
+    d.style.left = `${x}px`;
+    d.style.top = `${y}px`;
+    d.style.background = k % 3 ? color.trim() : "#ffffff";
+    d.style.setProperty("--dx", `${Math.cos(a) * dist}px`);
+    d.style.setProperty("--dy", `${Math.sin(a) * dist}px`);
+    d.addEventListener("animationend", () => d.remove());
+    document.body.append(d);
+  }
 }
 
 function escapeHtml(s: string) {
@@ -603,6 +624,9 @@ function showCards(options: string[], time: number, left: number) {
   options.forEach((id, i) => {
     const el = cardEl(id, i + 1);
     el.onclick = () => pickCard(i);
+    // v1.4: 한 장씩 뒤집히며 등장
+    el.classList.add("deal");
+    el.style.animationDelay = `${i * 110}ms`;
     list.append(el);
   });
   $("cards-left").textContent = left > 1 ? `(남은 선택 ${left}장) ` : "";
@@ -617,6 +641,10 @@ function pickCard(i: number) {
   const list = [...$("card-list").children];
   if (i >= list.length) return;
   list.forEach((el, j) => el.classList.toggle("picked", i === j));
+  // v1.4: 고른 카드에서 빛 조각이 터짐
+  const r = list[i].getBoundingClientRect();
+  if (!settings.potato) cardBurst(r.left + r.width / 2, r.top + r.height / 2, getComputedStyle(list[i]).getPropertyValue("--c") || "#fff");
+  sfx.magic();
   net.send({ t: "pick", idx: i });
 }
 
@@ -997,6 +1025,41 @@ function showResult(r: Extract<ServerMsg, { t: "result" }>) {
   show("result");
 }
 
+// ---------- v1.4 보스 등장 컷씬 (VS) ----------
+let bossIntroTimer: number | undefined;
+function showBossIntro(boss: string, world: number, time: number) {
+  const def = MONSTERS[boss];
+  if (!def) return;
+  const box = $("boss-intro");
+  const party = $("bi-party");
+  party.innerHTML = "";
+  // 게임 시작 직후라 아직 화면 정보가 없으면 로비 정보로
+  const heroes = lastSnap?.players.length
+    ? lastSnap.players.map((p) => ({ cls: p.cls, c: p.c, n: p.n }))
+    : (lobbyInfo?.players ?? []).map((p) => ({ cls: p.cls, c: p.color, n: p.name }));
+  for (const p of heroes) {
+    const row = document.createElement("div");
+    row.className = "bi-hero";
+    row.append(heroCanvas(p.cls, p.c));
+    const n = document.createElement("span");
+    n.textContent = p.n;
+    n.style.color = PLAYER_COLORS[p.c];
+    row.append(n);
+    party.append(row);
+  }
+  const bossBox = $("bi-boss");
+  bossBox.innerHTML = "";
+  bossBox.append(paint(BODIES[def.base][0], monsterPalette(def.pal), 1));
+  $("bi-name").textContent = def.name;
+  $("bi-sub").textContent = `${WORLDS[world - 1]?.name ?? ""}의 주인`;
+  box.classList.remove("hidden", "play");
+  void box.offsetWidth;
+  box.classList.add("play");
+  sfx.bossRoar();
+  clearTimeout(bossIntroTimer);
+  bossIntroTimer = window.setTimeout(() => box.classList.add("hidden"), time * 1000);
+}
+
 // ---------- 로비 미니게임: 양배추 축구 ----------
 const LP_OX = 16;
 const LP_OY = 10;
@@ -1356,6 +1419,9 @@ net.onMessage = async (m: ServerMsg) => {
       break;
     case "lobbyPlay":
       onLobbyPlay(m);
+      break;
+    case "bossIntro":
+      showBossIntro(m.boss, m.world, m.time);
       break;
     case "race":
       renderRace(m.entries, m.over);

@@ -68,6 +68,64 @@ const FLAME = [
 ];
 
 export const CARD_ART: Record<string, Art> = {
+  // v1.4 현란한 카드
+  orbit: { rows: [
+    "....ww....",
+    "...wWWw...",
+    "w..wWWw..w",
+    "Ww..ww..wW",
+    ".WW.oo.WW.",
+    ".WW.oo.WW.",
+    "Ww..ww..wW",
+    "w..wWWw..w",
+    "...wWWw...",
+    "....ww....",
+  ], pal: { w: "#e8ecf8", W: "#8890b0", o: "#f8d040" } },
+  critboom: { rows: [
+    "....y.....",
+    ".y..Y..y..",
+    "..yYOOy...",
+    ".yYOrrOYy.",
+    "yYOrRRrOYy",
+    ".yYOrrOYy.",
+    "..yYOOy...",
+    ".y..Y..y..",
+    "....y.....",
+  ], pal: { y: "#fff4a0", Y: "#f8d040", O: "#f08030", r: "#e84030", R: "#ffffff" } },
+  meteorrain: { rows: [
+    "y.........",
+    ".yy.......",
+    "..yYy.....",
+    "...yYOo...",
+    ".....OOro.",
+    ".....oRRro",
+    "......rRRr",
+    "......orro",
+    ".......oo.",
+  ], pal: { y: "#fff4a0", Y: "#f8d040", O: "#f08030", o: "#a04018", r: "#e84030", R: "#ffd080" } },
+  frostdash: { rows: [
+    "....w.....",
+    ".w..W..w..",
+    "..wWbWw...",
+    "wWWbBbWWw.",
+    "..wWbWw...",
+    ".w..W..w..",
+    "....w.....",
+    "bbb..bbbb.",
+    ".bbbb..bb.",
+  ], pal: { w: "#ffffff", W: "#c0e8ff", b: "#60a0ff", B: "#ffffff" } },
+  killzap: { rows: [
+    "....yY....",
+    "...yY.....",
+    "..yYy.....",
+    ".yYYYYy...",
+    "....yY....",
+    "...yY..s..",
+    "..yY..sSs.",
+    ".yY....s..",
+    "yY........",
+  ], pal: { y: "#fff4a0", Y: "#f8d040", s: "#e0e0e0", S: "#ff4040" } },
+
   // ----- 기본 능력치 -----
   muscle: {
     badge: "up",

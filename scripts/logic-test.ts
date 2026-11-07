@@ -33,7 +33,7 @@ const B = g.players.get(2)!;
 
 // ---------- 카드 수 ----------
 check("검사 이름 변경 + 마법사 스킬 피해 감소", (await import("../shared/classes")).CLASSES.warrior.name === "검사" && (g as any).players.size > 0);
-check("카드 71장 (닌자·네크로 전용 4장 포함)", CARDS.length === 71, `${CARDS.length}`);
+check("카드 76장 (v1.4 현란한 카드 5장 포함)", CARDS.length === 76, `${CARDS.length}`);
 check("팀카드 10장", CARDS.filter((c) => c.rarity === "team").length === 10);
 
 // ---------- 암시장 ----------
@@ -672,7 +672,7 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   gv.giveCard(sw, "feather");
   gv.giveCard(sw, "feather");
   check("카드 고정값: 가벼운 발걸음 2장 = 이속 +14", Math.abs(sw.stats.speedMul * CL9.warrior.speed - (CL9.warrior.speed + 14)) < 0.01);
-  check("근접 버프: 검사 체력 170 · 받는 피해 -15%", CL9.warrior.hp === 170 && sw.stats.dmgTakenMul === 0.85);
+  check("근접: 검사 체력 170 · v1.4 받는 피해 감소 없음", CL9.warrior.hp === 170 && sw.stats.dmgTakenMul === 1);
   check("원거리 너프: 궁수 평타 9", CL9.archer.attack.dmg === 9);
 
   // 닌자
@@ -783,7 +783,7 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   const mk = (n: number) => new Game(Array.from({ length: n }, (_, i) => ({ id: i + 1, name: `M${i}`, color: i, cls: "warrior" as const })), () => {}, () => {}, () => {});
   const solo = mk(1);
   const quad = mk(4);
-  const SPECIAL = ["bomb_shroom", "shield_knight", "summoner", "orb_mage"];
+  const SPECIAL = ["bomb_shroom", "shield_knight", "summoner", "orb_mage", "field_rat", "sand_worm", "frost_archer", "spore_shroom", "wind_spirit", "lava_golem", "wraith_knight", "archangel"];
   const cnt = (g: any) => g.monsters.filter((m: any) => !m.elite && m.kind !== "chest" && !SPECIAL.includes(m.kind)).length;
   check("몹 수: 4명이면 혼자의 4배", cnt(quad) === cnt(solo) * 4, `${cnt(solo)} -> ${cnt(quad)}`);
   const s1 = (solo as any).monsters.find((m: any) => m.kind === "slime" && !m.elite);
@@ -999,6 +999,64 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   check("연속 처치 콤보", p.combo === 4);
   for (let i = 0; i < 90; i++) G1.updatePlayer(p);
   check("2.5초 지나면 콤보 초기화", !p.combo);
+}
+
+// ---------- v1.4: 보스 고유 패턴 · 컷씬 · 새 잡몹 · 새 카드 ----------
+{
+  const { WORLDS: W14, worldDmgMul: wdm } = await import("../shared/worlds");
+  check("월드마다 세 번째 잡몹이 정의됨", W14.every((w) => !!MONSTERS[w.extra]));
+  check("챕터별 몬스터 피해 상향 (8월드 약 6배)", wdm(8) > 5.5 && wdm(1) === 1, `${wdm(8).toFixed(2)}`);
+  const sig: Record<string, string> = { king_slime: "bounce", pharaoh: "sandwall", yeti: "avalanche", flower_queen: "garden", thunder_eagle: "boltline", demon_lord: "hellfire", ghost_captain: "phantom", prank_god: "judgment" };
+  check("보스마다 고유 패턴", W14.every((w) => MONSTERS[w.boss].boss!.abilities.includes(sig[w.boss] as any)));
+  const gb = new Game([{ id: 1, name: "B", color: 0, cls: "warrior" }, { id: 2, name: "C", color: 1, cls: "mage" }], () => {}, () => {}, () => {});
+  const GB = gb as any;
+  const p = gb.players.get(1)!;
+  for (const q of gb.players.values()) q.god = true;
+  for (const [boss, ab] of Object.entries(sig)) {
+    gb.monsters = []; gb.zones = []; gb.projs = [];
+    const b = gb.spawnMonster(boss, { x: p.x + 70, y: p.y })!;
+    b.spawnT = 0;
+    GB.bossAbility(b, ab, p, false);
+    for (let i = 0; i < 40; i++) GB.updateVolleys(b, p);
+    const made = gb.zones.length + gb.projs.length + gb.monsters.length - 1;
+    check(`보스 고유 패턴 동작: ${MONSTERS[boss].name} (${ab})`, made > 0, `${made}`);
+  }
+  // 컷씬 동안 멈춤
+  const sent: ServerMsg[] = [];
+  const gi = new Game([{ id: 1, name: "I", color: 0, cls: "warrior" }], (m) => sent.push(m), () => {}, () => {});
+  const GI = gi as any;
+  GI.round = 6;
+  GI.nextRound();
+  const intro = sent.find((m) => m.t === "bossIntro");
+  const ip = gi.players.get(1)!;
+  const x0 = ip.x;
+  ip.input = { ...ip.input, right: true };
+  for (let i = 0; i < 30; i++) gi.tick();
+  check("보스 컷씬: VS 메시지 + 그동안 멈춤", !!intro && ip.x === x0);
+  for (let i = 0; i < 120; i++) gi.tick();
+  check("컷씬 뒤엔 다시 움직임", ip.x !== x0);
+  // 새 카드
+  const gc = new Game([{ id: 1, name: "K", color: 0, cls: "warrior" }], () => {}, () => {}, () => {});
+  const GC = gc as any;
+  const kp = gc.players.get(1)!;
+  kp.god = true;
+  gc.giveCard(kp, "orbit");
+  gc.monsters = [];
+  const om = gc.spawnMonster("slime", { x: kp.x + 26, y: kp.y })!;
+  om.spawnT = 0; om.hp = om.mhp = 9999;
+  for (let i = 0; i < 60; i++) { GC.buildGrid(); GC.updateCardFx(kp); GC.time += 1 / 30; }
+  check("회전 칼날: 주변 적에게 피해", om.hp < 9999);
+  gc.giveCard(kp, "killzap");
+  gc.monsters = [];
+  const k1 = gc.spawnMonster("slime", { x: kp.x + 30, y: kp.y })!, k2 = gc.spawnMonster("slime", { x: kp.x + 50, y: kp.y })!;
+  k1.spawnT = 0; k2.spawnT = 0;
+  const h2 = k2.hp;
+  gc.dealDamage(k1, 99999, kp, { raw: true, noCrit: true });
+  check("처치 번개: 처치하면 주변 적에게 번개", k2.hp < h2);
+  gc.giveCard(kp, "meteorrain");
+  gc.zones = [];
+  for (let i = 0; i < 130; i++) GC.updateCardFx(kp);
+  check("유성 소환: 4초마다 유성", gc.zones.some((z) => z.kind === "meteor"));
 }
 
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");

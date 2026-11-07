@@ -146,6 +146,8 @@ export interface SnapPlayer {
   spec?: boolean;
   /** 바드 용기의 노래 연주 중 */
   song?: boolean;
+  /** 회전 칼날 수 */
+  ob?: number;
   /** 연속 처치 콤보 (3 이상일 때만) */
   cb?: number;
   /** 코스튬 (모자·망토·발자국·레벨업 이펙트·칭호) — 바뀔 때만 옴 */
@@ -214,7 +216,9 @@ export interface SnapZone {
 export type FxKind =
   | "hit" | "die" | "swing" | "boom" | "heal" | "taunt" | "revive" | "pdie"
   | "coin" | "lvl" | "num" | "zap" | "line" | "spin" | "shield" | "blink" | "crit" | "fall" | "bolt"
-  | "flame" | "food" | "sleep" | "encore";
+  | "flame" | "food" | "sleep" | "encore"
+  // v1.4: 서리 대시 · 보스 광폭화
+  | "frost" | "rage";
 
 export interface Fx {
   k: FxKind;
@@ -468,6 +472,8 @@ export type ServerMsg =
   /** 화면 가운데 큰 타이틀 (이벤트 이름 + 설명) */
   | { t: "title"; name: string; desc: string; color?: string }
   | { t: "pong"; c: number }
+  /** v1.4 보스 등장 컷씬 (VS) */
+  | { t: "bossIntro"; boss: string; world: number; time: number }
   /** 보물방 상자 결과 (나에게만) — gold: 얻은 돈, mimic이면 lost: 잃은 돈 */
   | { t: "chestResult"; idx: number; mimic: boolean; gold: number; lost: number; total: number }
   /** PANIC 구역 돌파 (COMPLETE! 연출) */

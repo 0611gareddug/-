@@ -225,6 +225,60 @@ input:focus { border-color: var(--accent); }
 .skill-slot.passive .nm { color: #d8ffe0; }
 .skill-slot .pv { position: absolute; right: 3px; bottom: 1px; font-size: 8px; color: #a8f0b8; letter-spacing: 0.5px; }
 
+/* ---------- v1.4 피해 숫자 ---------- */
+.dmg-num { position: absolute; transform: translate(-50%, -100%); font-family: "Galmuri11", monospace; font-size: 13px; color: #ffffff; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; pointer-events: none; animation: dmgUp 0.7s ease-out forwards; white-space: nowrap; }
+.dmg-num.big { font-size: 17px; color: #ffe070; }
+.dmg-num.crit { font-size: 22px; color: #ff9030; animation: dmgCrit 0.85s ease-out forwards; text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 0 0 8px #ff4020; }
+@keyframes dmgUp { 0% { opacity: 1; margin-top: 0; } 70% { opacity: 1; } 100% { opacity: 0; margin-top: -22px; } }
+@keyframes dmgCrit { 0% { opacity: 1; transform: translate(-50%, -100%) scale(1.8); } 25% { transform: translate(-50%, -100%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; margin-top: -26px; transform: translate(-50%, -100%) scale(1); } }
+
+/* ---------- v1.4 보스 연출 큰 글자 ---------- */
+.fx-banner { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 45; pointer-events: none; font-family: "Galmuri14", monospace; font-size: 64px; color: #fff4c0; text-shadow: 4px 4px 0 #000, 0 0 24px #ffb020; animation: bannerIn 1.6s ease-out forwards; }
+@keyframes bannerIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.1); } }
+
+/* ---------- v1.4 보스 등장 컷씬 (VS) ---------- */
+.boss-intro { position: fixed; inset: 0; z-index: 50; background: rgba(5, 3, 10, 0.86); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; overflow: hidden; pointer-events: none; }
+.boss-intro .bi-bar { position: absolute; left: 0; right: 0; height: 12vh; background: #000; }
+.boss-intro .bi-bar.top { top: 0; }
+.boss-intro .bi-bar.bottom { bottom: 0; }
+.bi-side { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.bi-hero { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+.bi-hero canvas { width: 36px; height: 47px; image-rendering: pixelated; }
+.bi-vs { font-family: "Galmuri14", monospace; font-size: 96px; color: #ff4a3a; text-shadow: 6px 6px 0 #000, 0 0 30px #ff2020; padding: 0 24px; }
+.bi-boss canvas { width: 220px; height: auto; image-rendering: pixelated; filter: drop-shadow(0 0 18px rgba(255, 80, 40, 0.6)); }
+.bi-name { font-family: "Galmuri14", monospace; font-size: 40px; color: #ffd040; text-shadow: 4px 4px 0 #000; }
+.bi-sub { color: var(--muted); font-size: 14px; letter-spacing: 2px; }
+.boss-intro.play .bi-side.left { animation: biLeft 0.55s cubic-bezier(.2, 1.4, .4, 1) both; }
+.boss-intro.play .bi-side.right { animation: biRight 0.55s cubic-bezier(.2, 1.4, .4, 1) 0.15s both; }
+.boss-intro.play .bi-vs { animation: biVs 0.5s ease-out 0.55s both; }
+.boss-intro.play .bi-bar.top { animation: biBar 0.4s ease-out both; }
+.boss-intro.play .bi-bar.bottom { animation: biBar 0.4s ease-out both; }
+.boss-intro.play { animation: biFade 3.2s linear both; }
+@keyframes biLeft { from { transform: translateX(-60vw); } to { transform: none; } }
+@keyframes biRight { from { transform: translateX(60vw); } to { transform: none; } }
+@keyframes biVs { 0% { opacity: 0; transform: scale(3) rotate(-12deg); } 60% { opacity: 1; transform: scale(0.9) rotate(3deg); } 100% { transform: scale(1) rotate(0); } }
+@keyframes biBar { from { height: 0; } }
+@keyframes biFade { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---------- v1.4 카드 연출 ---------- */
+.card { position: relative; overflow: hidden; }
+.card.deal { animation: cardDeal 0.5s cubic-bezier(.2, 1.3, .4, 1) both; }
+@keyframes cardDeal { from { opacity: 0; transform: perspective(600px) rotateY(100deg) translateY(30px) scale(0.8); } to { opacity: 1; transform: none; } }
+.card .shine { position: absolute; inset: 0; pointer-events: none; }
+.card.r-rare .shine { background: linear-gradient(115deg, transparent 35%, rgba(120, 190, 255, 0.35) 50%, transparent 65%); background-size: 250% 100%; animation: shineSweep 2.6s linear infinite; }
+.card.r-legend .shine { background: linear-gradient(120deg, rgba(255, 80, 80, 0.18), rgba(255, 220, 60, 0.18), rgba(80, 255, 140, 0.18), rgba(80, 160, 255, 0.18), rgba(200, 90, 255, 0.18), rgba(255, 80, 80, 0.18)); background-size: 300% 300%; animation: holo 3s linear infinite; mix-blend-mode: screen; }
+.card.r-legend { animation: legendGlow 1.6s ease-in-out infinite alternate; }
+.card.r-legend.deal { animation: cardDeal 0.5s cubic-bezier(.2, 1.3, .4, 1) both, legendGlow 1.6s ease-in-out 0.5s infinite alternate; }
+.card.r-curse .shine { background: radial-gradient(circle at 50% 30%, rgba(160, 112, 240, 0.25), transparent 60%); animation: cursePulse 1.4s ease-in-out infinite alternate; }
+@keyframes shineSweep { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+@keyframes holo { from { background-position: 0% 50%; } to { background-position: 300% 50%; } }
+@keyframes legendGlow { from { box-shadow: 0 0 0 3px #000, 0 0 14px -2px var(--legend); } to { box-shadow: 0 0 0 3px #000, 0 0 34px 4px var(--legend); } }
+@keyframes cursePulse { from { opacity: 0.4; } to { opacity: 1; } }
+.card.picked { animation: cardPick 0.35s ease-out both !important; }
+@keyframes cardPick { 0% { transform: scale(1); } 40% { transform: scale(1.15); filter: brightness(1.8); } 100% { transform: scale(1.05); filter: brightness(1.15); } }
+.card-spark { position: fixed; width: 6px; height: 6px; z-index: 70; pointer-events: none; animation: spark 0.6s ease-out forwards; box-shadow: 0 0 6px currentColor; }
+@keyframes spark { from { transform: translate(-50%, -50%); opacity: 1; } to { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.3); opacity: 0; } }
+
 /* ---------- 콤보 (머리 위) ---------- */
 .head-combo { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; font-family: "Galmuri11", monospace; color: #f8e070; text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; line-height: 1; display: flex; align-items: baseline; gap: 3px; }
 .head-combo b { font-size: 20px; font-weight: normal; }
