@@ -9,6 +9,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    ver: "v1.3",
+    tags: ["최적화", "버그 수정"],
+    title: "이동 렉 개선",
+    items: [
+      "윈도우 PC로 연 서버에서 게임이 70% 속도로 느려지던 문제 수정 (타이머가 늦게 울리면 밀린 만큼 따라잡음)",
+      "핑이 높을 때 걷는 내내 뒤로 당겨져 이동이 느려 보이던 문제 수정 (지연 시간을 재서 그때의 내 위치와 비교)",
+    ],
+  },
+  {
     ver: "v1.2",
     tags: ["최적화", "편의"],
     title: "서버 최적화 · 감자 모드",

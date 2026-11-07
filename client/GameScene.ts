@@ -163,6 +163,10 @@ export class GameScene extends Phaser.Scene {
   private mapKey = 0;
   private snaps: { at: number; s: Snapshot }[] = [];
   local = { x: 0, y: 0, vx: 0, vy: 0, init: false, dashT: 0, dashDx: 0, dashDy: 0 };
+  /** v1.3 왕복 지연(ms) — main 이 핑으로 측정해서 넣어 줌 */
+  rtt = 100;
+  /** 내 예측 위치 기록 (지연만큼 과거의 내 위치와 서버 위치를 비교하려고) */
+  private hist: { t: number; x: number; y: number }[] = [];
   private players = new Map<number, PlayerView>();
   private monsters = new Map<number, MonsterView>();
   private projs = new Map<number, Phaser.GameObjects.Image>();
@@ -584,17 +588,30 @@ export class GameScene extends Phaser.Scene {
       if (pos.y === this.local.y) this.local.vy = 0;
       this.local.x = pos.x;
       this.local.y = pos.y;
-      const ex = meSnap.x - this.local.x;
-      const ey = meSnap.y - this.local.y;
+      // v1.3 보정: 서버 위치는 '왕복 지연'만큼 과거의 내 위치와 비교 (지금 위치와 비교하면 걷는 내내 뒤로 당겨져서 느려짐)
+      const nowT = performance.now();
+      this.hist.push({ t: nowT, x: this.local.x, y: this.local.y });
+      while (this.hist.length > 2 && nowT - this.hist[0].t > 1500) this.hist.shift();
+      const recvAt = this.snaps[this.snaps.length - 1]?.at ?? nowT;
+      const when = recvAt - this.rtt;
+      let past = this.hist[0];
+      for (const h of this.hist) { if (h.t <= when) past = h; else break; }
+      const serverDash = meSnap.dash && this.local.dashT <= 0;
+      // 서버 쪽 돌진(방패 돌진 등)은 지금 위치를 서버 위치로 빠르게 맞춤
+      const ex = meSnap.x - (serverDash ? this.local.x : past.x);
+      const ey = meSnap.y - (serverDash ? this.local.y : past.y);
       const err = Math.hypot(ex, ey);
-      if (err > 40) {
+      if (err > 48) {
         this.local.x = meSnap.x;
         this.local.y = meSnap.y;
-      } else if (err > 3 || (meSnap.dash && this.local.dashT <= 0)) {
-        // 서버 쪽 돌진(방패 돌진 등)은 서버 위치를 빠르게 따라감
-        const k = 1 - Math.exp(-dt * (meSnap.dash ? 20 : 6));
-        this.local.x += ex * k;
-        this.local.y += ey * k;
+        this.hist = [];
+      } else if (err > 2.5 || serverDash) {
+        const k = 1 - Math.exp(-dt * (serverDash ? 20 : 8));
+        const cx = ex * k, cy = ey * k;
+        this.local.x += cx;
+        this.local.y += cy;
+        // 기록도 같이 옮겨서 같은 오차를 두 번 고치지 않게
+        for (const h of this.hist) { h.x += cx; h.y += cy; }
       }
       this.cameras.main.centerOn(Math.round(this.local.x), Math.round(this.local.y));
     }

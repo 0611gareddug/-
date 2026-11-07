@@ -50,6 +50,28 @@ interface Member {
   cos: Equip;
 }
 
+/**
+ * v1.3 고정 간격 루프: 타이머가 늦게 울려도(윈도우는 약 15ms 단위) 밀린 틱만큼 따라잡아서
+ * 게임 속도가 항상 실제 시간과 같게. 너무 밀리면(서버가 멈췄다 깨어남) 버리고 다시 시작
+ */
+function fixedLoop(step: () => void, hz: number) {
+  const dt = 1000 / hz;
+  let last = performance.now();
+  let acc = 0;
+  return setInterval(() => {
+    const now = performance.now();
+    acc += now - last;
+    last = now;
+    let n = 0;
+    while (acc >= dt && n < 6) {
+      step();
+      acc -= dt;
+      n++;
+    }
+    if (acc > dt * 6) acc = 0;
+  }, 4);
+}
+
 class Room {
   members = new Map<number, Member>();
   /** 로비 미니게임 (양배추 축구) */
@@ -73,11 +95,11 @@ class Room {
   /** 로비 축구 루프 (게임 중엔 멈춤) */
   private startPlay() {
     if (this.playTimer) return;
-    this.playTimer = setInterval(() => {
+    this.playTimer = fixedLoop(() => {
       if (this.inGame || this.members.size === 0) return;
       this.play.sync([...this.members.values()].filter((m) => !m.dc).map((m) => m.id));
       if (this.play.step()) this.broadcast(this.play.snapshot());
-    }, 1000 / 30);
+    }, 30);
   }
 
   gameFor(id: number) {
@@ -255,7 +277,7 @@ class Room {
         hostName: this.host?.name ?? "",
       },
     );
-    this.timer = setInterval(() => this.game?.step(), 1000 / TICK_RATE);
+    this.timer = fixedLoop(() => this.game?.step(), TICK_RATE);
   }
 
   /** 스피드런: 한 명당 게임 하나씩 (각자 다른 맵), 진행 현황은 모두에게 */
@@ -272,7 +294,7 @@ class Room {
       );
       this.race.set(m.id, g);
     }
-    this.timer = setInterval(() => { for (const g of this.race?.values() ?? []) g.step(); }, 1000 / TICK_RATE);
+    this.timer = fixedLoop(() => { for (const g of this.race?.values() ?? []) g.step(); }, TICK_RATE);
     this.raceTimer = setInterval(() => this.sendRace(), 1000);
     this.sendRace();
   }
@@ -368,6 +390,11 @@ wss.on("connection", (ws) => {
     try {
       msg = JSON.parse(raw.toString());
     } catch {
+      return;
+    }
+
+    if (msg.t === "ping") {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "pong", c: Number(msg.c) || 0 }));
       return;
     }
 

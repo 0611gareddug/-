@@ -1194,7 +1194,17 @@ function stageLabel(st: StageInfo) {
 let lastWorld = 0;
 
 // ---------- 서버 메시지 ----------
+// v1.3 핑: 2초마다 왕복 지연을 재서 내 캐릭터 위치 보정에 씀
+let rtt = 100;
+setInterval(() => net.send({ t: "ping", c: performance.now() }), 2000);
+
 net.onMessage = async (m: ServerMsg) => {
+  if (m.t === "pong") {
+    const r = performance.now() - m.c;
+    if (r >= 0 && r < 3000) rtt = rtt * 0.7 + r * 0.3;
+    if (scene) scene.rtt = rtt;
+    return;
+  }
   switch (m.t) {
     case "error":
       // 다시 연결하려 했는데 이미 자리가 없어진 경우

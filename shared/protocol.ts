@@ -87,6 +87,8 @@ export type ClientMsg =
   | { t: "auth"; code: string }
   /** 메뉴를 열면 (혼자일 때만) 일시정지 */
   | { t: "menuPause"; on: boolean }
+  /** 핑 측정 (클라 시각을 그대로 돌려받음) */
+  | { t: "ping"; c: number }
   /** 게임에서 혼자 빠져 로비로 (개발자 도구 감지 시) */
   | { t: "leaveGame" }
   /** 보물방: 가까운 상자 열기 */
@@ -465,6 +467,7 @@ export type ServerMsg =
   | { t: "admin"; ok: boolean }
   /** 화면 가운데 큰 타이틀 (이벤트 이름 + 설명) */
   | { t: "title"; name: string; desc: string; color?: string }
+  | { t: "pong"; c: number }
   /** 보물방 상자 결과 (나에게만) — gold: 얻은 돈, mimic이면 lost: 잃은 돈 */
   | { t: "chestResult"; idx: number; mimic: boolean; gold: number; lost: number; total: number }
   /** PANIC 구역 돌파 (COMPLETE! 연출) */
