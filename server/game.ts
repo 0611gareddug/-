@@ -17,11 +17,12 @@ import {
   type BossAbility, type MonsterDef, type StatusEffect,
 } from "../shared/worlds";
 import { GEM_GOAL, PANIC_TIME, PANIC_ZONES } from "../shared/protocol";
+import { masteryGain } from "../shared/skins";
 import { TALENTS, TALENT_TIERS, talentPoints, tier } from "../shared/talents";
 import { generateMap, generateRestMap, generateTreasureMap, randomFloorPoint, type GenMap } from "./mapgen";
 import { castSkill } from "./skills";
 import {
-  addClears, addDescent, addPanic, addRecord, addW1Class, bumpCounter, codexCard, codexKill, deleteSave, getCodex, getProfile, putSave,
+  addClears, addDescent, addMastery, addPanic, addRecord, addW1Class, bumpCounter, codexCard, codexKill, deleteSave, getCodex, getProfile, putSave,
   unlockAch, type SaveData,
 } from "./store";
 import type { Equip } from "../shared/achievements";
@@ -1440,7 +1441,19 @@ export class Game {
     return { world: this.world, round: Math.min(this.round, ROUNDS_PER_WORLD + 1), time: Math.round(this.runTime * 10) / 10, state };
   }
 
+  /** v1.7 판이 끝나면 직업 숙련도 (커맨드를 쓴 판은 없음) */
+  private giveMastery() {
+    if (this.cmdUsed) return;
+    const progress = this.descent ? Math.floor(this.floor / 2) : this.panic ? this.zone : this.gemMode ? 2 : this.world - 1 + (this.won ? 1 : 0);
+    for (const p of this.players.values()) {
+      const gained = masteryGain({ kills: p.kills, dmgDealt: p.dmgDealt, progress, win: this.won && !this.gemMode });
+      const r = addMastery(p.name, p.cls, gained);
+      this.sendTo(p.id, { t: "mastery", cls: p.cls, gained, total: r.total, before: r.before, after: r.after });
+    }
+  }
+
   private sendResults() {
+    this.giveMastery();
     const list = [...this.players.values()];
     if (this.gemMode) {
       const rows: ResultRow[] = list

@@ -498,6 +498,31 @@ body.touch .hud-help, body.touch .skill-bar { display: none; }
 .codex-class .sk b { font-weight: normal; }
 .codex-card.ach .gold { font-size: 11px; }
 .cos-row { display: flex; flex-wrap: wrap; gap: 4px; }
+/* v1.7 직업 스킨 (마일스톤) */
+.skin-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid #24232f; }
+.skin-info { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.skin-info b { font-size: 14px; font-weight: normal; }
+.skin-bar { height: 6px; background: #000; border: 1px solid #2a2836; }
+.skin-bar > i { display: block; height: 100%; background: linear-gradient(90deg, #f0a030, #ffe070); }
+.skin-list { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+.skin-btn { flex: 0 0 auto; width: 66px; min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: #15141c; border: 2px solid var(--line); color: var(--text); font: inherit; font-size: 10px; line-height: 1.2; padding: 4px 2px; cursor: pointer; text-align: center; }
+.skin-btn canvas { width: 30px; height: 39px; image-rendering: pixelated; }
+.skin-btn.on { border-color: var(--accent); background: #1c2a30; }
+.skin-btn.locked { opacity: 0.45; cursor: default; }
+.skin-btn.locked canvas { filter: brightness(0.25); }
+.skin-btn.legend:not(.locked) { border-color: var(--glow); box-shadow: 0 0 10px -2px var(--glow); animation: legendSkin 1.6s ease-in-out infinite alternate; }
+.skin-btn.legend:not(.locked) canvas { filter: drop-shadow(0 0 4px var(--glow)); }
+@keyframes legendSkin { from { box-shadow: 0 0 6px -2px var(--glow); } to { box-shadow: 0 0 16px 2px var(--glow); } }
+.mastery-box { margin-top: 8px; padding: 8px; border: 2px solid #f0a030; background: rgba(40, 24, 8, 0.6); text-align: left; display: flex; flex-direction: column; gap: 5px; }
+.mastery-new { display: flex; flex-wrap: wrap; gap: 10px; color: #ffe070; font-size: 13px; }
+.mastery-new span { display: inline-flex; align-items: center; gap: 4px; animation: masteryPop 0.5s cubic-bezier(.2, 1.6, .4, 1) both; }
+.mastery-new canvas { width: 20px; height: 26px; image-rendering: pixelated; }
+@keyframes masteryPop { from { opacity: 0; transform: scale(1.8); } to { opacity: 1; transform: none; } }
+/* 모바일: 좁은 화면이면 직업 정보 위, 스킨 줄은 가로 스크롤 */
+@media (max-width: 640px) {
+  .skin-row { grid-template-columns: 1fr; gap: 4px; }
+  .skin-btn { width: 72px; min-height: 84px; font-size: 11px; }
+}
 .cos-btn { display: inline-flex; align-items: center; gap: 6px; }
 .cos-btn.locked { opacity: 0.4; }
 .cos-prev { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 14px; font-size: 10px; color: var(--legend); }

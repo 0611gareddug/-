@@ -84,6 +84,8 @@ export type ClientMsg =
   | { t: "codex" }
   | { t: "profile" }
   | { t: "equip"; slot: CosSlot; id: string | null }
+  /** v1.7 직업 스킨 고르기 (idx -1 = 기본) */
+  | { t: "skin"; cls: ClassId; idx: number }
   | { t: "toLobby" }
   /** 결과 화면 재도전 (방장: 같은 모드로 바로 다시 시작) */
   | { t: "retry" }
@@ -479,7 +481,9 @@ export type ServerMsg =
       card?: string;
     }
   | { t: "codex"; cards: string[]; kills: Record<string, number> }
-  | { t: "profile"; ach: string[]; equip: Equip; counters: Record<string, number> }
+  | { t: "profile"; ach: string[]; equip: Equip; counters: Record<string, number>; mastery?: Record<string, number>; skins?: Record<string, number> }
+  /** v1.7 판이 끝나고 얻은 직업 숙련도 */
+  | { t: "mastery"; cls: ClassId; gained: number; total: number; before: number; after: number }
   | { t: "achievement"; id: string }
   | { t: "toast"; msg: string }
   /** 커맨드 패널 권한 (서버가 허락했을 때만) */

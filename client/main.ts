@@ -7,7 +7,7 @@ import { CARD_BY_ID, FORGE_PRICE, GACHA_PRICE, RARITY_NAME, canForge } from "../
 import { MARKET_RANGE, PLAYER_COLORS, ROUNDS_PER_WORLD, VIEW_H, VIEW_W } from "../shared/constants";
 import { type SnapMonster, type SnapProj, type SnapshotWire, GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
 import { DIFFS, MONSTERS, WORLDS, WORLD_COUNT, diffDmgMul, diffHpMul, diffName } from "../shared/worlds";
-import { initMenu, isCapturingKey, isMenuOpen, onCodex, onProfile, setAdmin, toggleMenu } from "./menu";
+import { initMenu, isCapturingKey, isMenuOpen, mySkin, onCodex, onProfile, setAdmin, toggleMenu } from "./menu";
 import { ACH_BY_ID, titleName } from "../shared/achievements";
 import { displayKey, isKey, onSettingsChange, settings } from "./settings";
 import { GameScene } from "./GameScene";
@@ -16,7 +16,8 @@ import { initGuard } from "./guard";
 import { panicComplete, panicEnd, panicReset, panicSnap, panicStage } from "./panic";
 import { closeModeSelect, initModeSelect, isModeSelectOpen, miniBanner, modeIdOf, openModeSelect } from "./modeSelect";
 import { Net } from "./net";
-import { BODIES, heroPalette, heroRows, monsterPalette, paint } from "./sprites";
+import { BODIES, heroPalette, heroRows, heroSkinCanvas, monsterPalette, paint } from "./sprites";
+import { MASTERY_TIERS, SKINS } from "../shared/skins";
 import { paintCard } from "./cardArt";
 import { initTouch } from "./touch";
 import { TALENTS, TALENT_TIERS, tier } from "../shared/talents";
@@ -83,8 +84,8 @@ function addChat(name: string, color: number, text: string, id: number) {
 });
 const visible = (id: ScreenId) => !$(id).classList.contains("hidden");
 
-function heroCanvas(cls: ClassId, color: number) {
-  return paint(heroRows(cls, 0), heroPalette(cls, color));
+function heroCanvas(cls: ClassId, color: number, skin?: number) {
+  return skin === undefined ? paint(heroRows(cls, 0), heroPalette(cls, color)) : heroSkinCanvas(cls, color, skin);
 }
 
 function cardIcon(id: string, size: number): HTMLElement {
@@ -217,7 +218,7 @@ function renderLobby() {
     const el = document.createElement("div");
     el.className = "slot" + (p ? "" : " empty");
     if (p) {
-      el.append(heroCanvas(p.cls, p.color));
+      el.append(heroCanvas(p.cls, p.color, p.cos?.sk));
       const name = document.createElement("div");
       name.textContent = (p.host ? "👑 " : "") + p.name;
       const ttl = titleName(p.cos?.title);
@@ -261,7 +262,7 @@ function renderLobby() {
     role.textContent = `${c.role} · 체력 ${c.hp}`;
     const sk = document.createElement("span");
     sk.textContent = `1 ${c.skills[0].name}`;
-    el.append(heroCanvas(id, me?.color ?? 0), b, role, sk);
+    el.append(heroCanvas(id, me?.color ?? 0, mySkin(id)), b, role, sk);
     el.title = c.skills.map((s, i) => `${i + 1}번 (Lv${s.unlock}) ${s.name}: ${s.desc}`).join("\n");
     el.onclick = () => net.send({ t: "class", cls: id });
     classes.append(el);
@@ -1082,6 +1083,33 @@ function showResult(r: Extract<ServerMsg, { t: "result" }>) {
   show("result");
 }
 
+// ---------- v1.7 판 끝 직업 숙련도 ----------
+function showMastery(m: Extract<ServerMsg, { t: "mastery" }>) {
+  const box = document.createElement("div");
+  box.className = "mastery-box";
+  const next = MASTERY_TIERS[m.after];
+  const prev = m.after > 0 ? MASTERY_TIERS[m.after - 1] : 0;
+  const pct = next ? Math.round(((m.total - prev) / (next - prev)) * 100) : 100;
+  box.innerHTML = `<div><b>${CLASSES[m.cls].name} 숙련도 +${m.gained}</b> <span class="muted">마일스톤 ${m.after}/5${next ? ` · 다음까지 ${next - m.total}` : " · 전부 해금!"}</span></div>
+    <div class="skin-bar"><i style="width:${pct}%"></i></div>`;
+  if (m.after > m.before) {
+    const got = document.createElement("div");
+    got.className = "mastery-new";
+    for (let t = m.before; t < m.after; t++) {
+      const sp = document.createElement("span");
+      sp.append(heroSkinCanvas(m.cls, 0, t), document.createTextNode(` 새 스킨 「${SKINS[m.cls][t].name}」!`));
+      got.append(sp);
+    }
+    box.append(got);
+    sfx.fanfare();
+    setTimeout(() => toast("새 스킨이 열렸어요! 메뉴 → 옷장에서 입을 수 있어요"), 600);
+  }
+  // 결과창이 이미 떠 있으면 안에, 아니면 잠깐 뒤에
+  const put = () => { const info = $("result-info"); info.querySelector(".mastery-box")?.remove(); info.append(box); };
+  if (visible("result")) put();
+  else setTimeout(put, 400);
+}
+
 // ---------- v1.5 보스 유물 고르기 ----------
 function showRelics(options: string[] | null) {
   const box = $("relic-pick");
@@ -1115,13 +1143,13 @@ function showBossIntro(boss: string, world: number, time: number) {
   party.innerHTML = "";
   // 게임 시작 직후라 아직 화면 정보가 없으면 로비 정보로
   const heroes = lastSnap?.players.length
-    ? lastSnap.players.map((p) => ({ cls: p.cls, c: p.c, n: p.n }))
-    : (lobbyInfo?.players ?? []).map((p) => ({ cls: p.cls, c: p.color, n: p.name }));
+    ? lastSnap.players.map((p) => ({ cls: p.cls, c: p.c, n: p.n, sk: p.cos?.sk }))
+    : (lobbyInfo?.players ?? []).map((p) => ({ cls: p.cls, c: p.color, n: p.name, sk: p.cos?.sk }));
   heroes.forEach((p, i) => {
     const row = document.createElement("div");
     row.className = "bi-hero";
     row.style.setProperty("--i", String(i));
-    row.append(heroCanvas(p.cls, p.c));
+    row.append(heroCanvas(p.cls, p.c, p.sk));
     const n = document.createElement("span");
     n.textContent = p.n;
     n.style.color = PLAYER_COLORS[p.c];
@@ -1520,6 +1548,9 @@ net.onMessage = async (m: ServerMsg) => {
       break;
     case "relics":
       showRelics(m.options);
+      break;
+    case "mastery":
+      showMastery(m);
       break;
     case "forged":
       myUpgraded = new Set(m.upgraded);

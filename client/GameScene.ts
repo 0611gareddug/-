@@ -6,9 +6,10 @@ import type { Fx, InputState, Snapshot, SnapMonster, SnapPlayer, StageInfo } fro
 import { MONSTERS, WORLDS, type WorldDef } from "../shared/worlds";
 import type { Net } from "./net";
 import { isKey, settings } from "./settings";
+import { SKINS } from "../shared/skins";
 import { titleName } from "../shared/achievements";
 import {
-  BODIES, CAPES, CHEST, CHEST_PAL, COIN, COIN_PAL, GEM, GEM_PAL, HATS, RAINBOW, SPIDER, SPIDER_LASER_PAL, SPIDER_PAL, TRAILS,
+  BODIES, CAPES, skinPalette, skinRows, CHEST, CHEST_PAL, COIN, COIN_PAL, GEM, GEM_PAL, HATS, RAINBOW, SPIDER, SPIDER_LASER_PAL, SPIDER_PAL, TRAILS,
   capedPalette, CROWN, CROWN_PAL, DUMMY, DUMMY_PAL, FLAME, FLAME_PAL, PORTAL, PORTAL_PAL,
   PROJ, TENT, TENT_PAL, TRAP, TRAP_PAL, WEAPONS,
   floorTile, heroPalette, heroRows, monsterPalette, paint, specialTile, wallTile,
@@ -34,6 +35,8 @@ interface PlayerView {
   lastY: number;
   walkT: number;
   frame: number;
+  /** v1.7 전설 스킨 빛 색 (적용된 것) */
+  glow?: string;
 }
 
 interface MonsterView {
@@ -81,6 +84,34 @@ export class GameScene extends Phaser.Scene {
     this.bubbleEls.clear();
     for (const el of this.comboEls.values()) el.remove();
     this.comboEls.clear();
+  }
+
+  /** v1.7 전설 스킨 연출 */
+  private legendT = new Map<number, number>();
+  private drawLegend(p: SnapPlayer, v: PlayerView, x: number, y: number, now: number) {
+    const sk = p.cos?.sk;
+    const glow = sk === 4 ? SKINS[p.cls]?.[4]?.glow : undefined;
+    const want = glow && !p.ghost ? glow : "";
+    // 빛나는 테두리 (WebGL이면 글로우 효과, 감자 모드면 끔)
+    if ((v.glow ?? "") !== (settings.potato ? "" : want)) {
+      v.glow = settings.potato ? "" : want;
+      v.body.preFX?.clear();
+      if (v.glow) v.body.preFX?.addGlow(Phaser.Display.Color.HexStringToColor(v.glow).color, 2, 0, false, 0.1, 6);
+    }
+    if (!want || this.lite) return;
+    // 움직이면 잔상 (반투명 그림이 뒤에 남음) + 반짝이
+    const last = this.legendT.get(p.id) ?? 0;
+    const moving = Math.hypot(x - v.lastX, y - v.lastY) > 0.05 || p.dash;
+    if (moving && now - last > 70) {
+      this.legendT.set(p.id, now);
+      const ghost = this.track(this.add.image(x, y + 5, v.body.texture.key).setOrigin(0.5, 1).setScale(p.size).setFlipX(v.body.flipX)
+        .setTint(Phaser.Display.Color.HexStringToColor(want).color).setAlpha(0.45).setDepth(y - 1).setBlendMode(Phaser.BlendModes.ADD));
+      this.tweens.add({ targets: ghost, alpha: 0, duration: 320, onComplete: () => ghost.destroy() });
+    }
+    if (Math.random() < 0.08) {
+      const c = Phaser.Display.Color.HexStringToColor(want).color;
+      this.pixelBurst(x + (Math.random() - 0.5) * 12, y - 6 - Math.random() * 10, 1, [c, 0xffffff], 8, 650);
+    }
   }
 
   /** v1.6 각성 오라: 발밑 금빛 고리 + 가끔 반짝임, 성역/만한전석은 범위 원 */
@@ -1159,6 +1190,14 @@ export class GameScene extends Phaser.Scene {
   /** 망토 코스튬이면 몸통 색을 바꾼 텍스처를 필요할 때 만들어 씀 */
   private heroTexture(p: SnapPlayer, frame: number, now: number) {
     const cape = p.cos?.cape;
+    const sk = p.cos?.sk;
+    if (sk !== undefined && sk >= 0 && sk < 5) {
+      // v1.7 직업 스킨 (+ 망토 색)
+      const capeColor = cape ? (cape === "rainbow" ? RAINBOW[Math.floor(now / 250) % RAINBOW.length] : CAPES[cape]) : undefined;
+      const key = `hero_${p.cls}_${p.c}_${frame}_s${sk}_${capeColor ?? ""}`;
+      if (!this.textures.exists(key)) this.textures.addCanvas(key, paint(skinRows(p.cls, frame, sk), skinPalette(p.cls, p.c, sk, capeColor)));
+      return key;
+    }
     if (!cape) return `hero_${p.cls}_${p.c}_${frame}`;
     const color = cape === "rainbow" ? RAINBOW[Math.floor(now / 250) % RAINBOW.length] : CAPES[cape];
     if (!color) return `hero_${p.cls}_${p.c}_${frame}`;
@@ -1189,6 +1228,8 @@ export class GameScene extends Phaser.Scene {
     // 연결 끊긴 사람: 머리 위에 깜빡이는 "연결끊김!" + 반투명
     v.off.setVisible(!!p.off && Math.floor(now / 400) % 2 === 0);
     v.root.setAlpha(p.off ? 0.55 : 1);
+    // v1.7 전설 스킨: 빛나는 테두리 + 움직이면 잔상·반짝이
+    this.drawLegend(p, v, x, y, now);
     // v1.4 카드 '회전 칼날'
     this.drawOrbit(p, x, y, now);
     // v1.6 각성 오라 (Lv15) · 성역/만한전석 범위

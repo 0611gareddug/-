@@ -5,6 +5,7 @@ import type { ClassId } from "../shared/classes";
 import type { TeamFlag } from "../shared/cards";
 import type { DescentEntry, Leaderboards, RecordEntry, Records, SaveSummary } from "../shared/protocol";
 import { ownedCosmetics, type CosSlot, type Equip } from "../shared/achievements";
+import { tierOf } from "../shared/skins";
 
 // 서버 전체 공용 데이터: 저장, 8월드 클리어 명단, 스피드런 순위, 도감
 const FILE = process.env.STORE_FILE ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../data/store.json");
@@ -45,6 +46,9 @@ export interface Profile {
   /** 월드 1을 깬 직업들 (만능 용사 업적) */
   w1Classes: string[];
   equip: Equip;
+  /** v1.7 직업별 숙련도 · 고른 스킨 번호 */
+  mastery: Record<string, number>;
+  skins: Record<string, number>;
 }
 
 interface StoreData {
@@ -255,7 +259,9 @@ export function codexKill(name: string, kind: string) {
 
 // ---------- 프로필: 업적 · 누적 기록 · 코스튬 ----------
 export function getProfile(name: string): Profile {
-  const p = (data.profiles[norm(name)] ??= { ach: [], counters: {}, w1Classes: [], equip: {} });
+  const p = (data.profiles[norm(name)] ??= { ach: [], counters: {}, w1Classes: [], equip: {}, mastery: {}, skins: {} });
+  p.mastery ??= {};
+  p.skins ??= {};
   p.ach ??= [];
   p.counters ??= {};
   p.w1Classes ??= [];
@@ -289,6 +295,30 @@ export function addW1Class(name: string, cls: string): number {
 }
 
 /** 가진 코스튬만 장착 가능. id 가 null 이면 벗기 */
+/** v1.7 숙련도 더하기 → 이전·이후 마일스톤 */
+export function addMastery(name: string, cls: string, n: number) {
+  const p = getProfile(name);
+  const before = p.mastery[cls] ?? 0;
+  p.mastery[cls] = before + Math.max(0, Math.round(n));
+  persist();
+  return { total: p.mastery[cls], before: tierOf(before), after: tierOf(p.mastery[cls]) };
+}
+
+/** v1.7 직업 스킨 고르기 (열린 단계까지만, -1 = 기본) */
+export function setSkin(name: string, cls: string, idx: number) {
+  const p = getProfile(name);
+  if (idx < 0) delete p.skins[cls];
+  else if (idx < tierOf(p.mastery[cls] ?? 0) && idx < 5) p.skins[cls] = idx;
+  persist();
+}
+
+/** 지금 직업에 맞는 스킨까지 붙인 코스튬 */
+export function cosFor(name: string, cls: string): Equip {
+  const p = getProfile(name);
+  const sk = p.skins[cls];
+  return sk === undefined ? { ...p.equip } : { ...p.equip, sk };
+}
+
 export function setEquip(name: string, slot: CosSlot, id: string | null): Equip {
   const p = getProfile(name);
   if (id === null) delete p.equip[slot];

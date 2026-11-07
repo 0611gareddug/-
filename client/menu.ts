@@ -1,11 +1,12 @@
 // Tab 메뉴: 아이콘 메뉴 → 설정 · 옷장 · 도감 · 업적 · 패치노트 (+ GRD 커맨드 패널)
+import { MASTERY_TIERS, SKINS, tierOf } from "../shared/skins";
 import { CLASSES, CLASS_IDS } from "../shared/classes";
 import { CARDS, RARITY_NAME, type Rarity } from "../shared/cards";
 import type { CmdAction, ServerMsg, Snapshot } from "../shared/protocol";
 import { MONSTERS, WORLDS, type MonsterDef } from "../shared/worlds";
 import type { Net } from "./net";
 import { KEY_LABEL, displayKey, keyName, resetKeys, saveSettings, settings, type KeyAction } from "./settings";
-import { BODIES, CAPES, HATS, RAINBOW, TRAILS, monsterPalette, paint } from "./sprites";
+import { BODIES, CAPES, HATS, RAINBOW, TRAILS, heroSkinCanvas, monsterPalette, paint } from "./sprites";
 import { paintCard } from "./cardArt";
 import { PATCH_NOTES } from "./patchNotes";
 import { ACHIEVEMENTS, SLOT_NAME, ownedCosmetics, type CosSlot, type Equip, type Reward } from "../shared/achievements";
@@ -37,7 +38,11 @@ export function setAdmin(ok: boolean) {
 }
 let codexTab: CodexTab = "cards";
 let codex: { cards: string[]; kills: Record<string, number> } = { cards: [], kills: {} };
-let profile: { ach: string[]; equip: Equip; counters: Record<string, number> } = { ach: [], equip: {}, counters: {} };
+let profile: { ach: string[]; equip: Equip; counters: Record<string, number>; mastery?: Record<string, number>; skins?: Record<string, number> } = { ach: [], equip: {}, counters: {} };
+/** v1.7 내가 고른 직업 스킨 (로비 미리보기용) */
+export function mySkin(cls: string): number | undefined {
+  return profile.skins?.[cls];
+}
 let cmdCat = "이동";
 /** 키 바꾸기 대기 중인 동작 */
 let capturing: KeyAction | null = null;
@@ -101,7 +106,7 @@ export function onCodex(m: Extract<ServerMsg, { t: "codex" }>) {
 }
 
 export function onProfile(m: Extract<ServerMsg, { t: "profile" }>) {
-  profile = { ach: m.ach, equip: m.equip, counters: m.counters };
+  profile = { ach: m.ach, equip: m.equip, counters: m.counters, mastery: m.mastery ?? {}, skins: m.skins ?? {} };
   if (isMenuOpen() && (tab === "ach" || tab === "cos")) render();
 }
 
@@ -255,6 +260,7 @@ function cosPreview(r: Reward): HTMLElement {
 }
 
 function renderCos(body: HTMLElement) {
+  renderSkins(body);
   const head = document.createElement("div");
   head.className = "muted";
   head.textContent = "업적으로 얻은 코스튬을 장착해요. 능력치는 없고 모두에게 보여요.";
@@ -283,6 +289,50 @@ function renderCos(body: HTMLElement) {
       b.onclick = () => net.send({ t: "equip", slot, id: r.id });
       row.append(b);
     }
+    body.append(row);
+  }
+}
+
+// ---------- v1.7 직업 스킨 (마일스톤) ----------
+function renderSkins(body: HTMLElement) {
+  const sec = document.createElement("div");
+  sec.className = "codex-sec";
+  sec.textContent = "직업 스킨 — 그 직업으로 플레이하면 숙련도가 쌓여 마일스톤마다 스킨이 열려요";
+  body.append(sec);
+  for (const cls of CLASS_IDS) {
+    const pts = profile.mastery?.[cls] ?? 0;
+    const tier = tierOf(pts);
+    const next = MASTERY_TIERS[tier];
+    const prev = tier > 0 ? MASTERY_TIERS[tier - 1] : 0;
+    const row = document.createElement("div");
+    row.className = "skin-row";
+    const info = document.createElement("div");
+    info.className = "skin-info";
+    info.innerHTML = `<b>${CLASSES[cls].name}</b><span class="muted">마일스톤 ${tier}/5</span>
+      <div class="skin-bar"><i style="width:${next ? Math.round(((pts - prev) / (next - prev)) * 100) : 100}%"></i></div>
+      <span class="muted">${next ? `숙련도 ${pts} / ${next}` : `숙련도 ${pts} · 전부 해금!`}</span>`;
+    row.append(info);
+    const list = document.createElement("div");
+    list.className = "skin-list";
+    const cur = profile.skins?.[cls];
+    const mk = (idx: number) => {
+      const b = document.createElement("button");
+      const has = idx < tier;
+      const legend = idx === 4;
+      b.className = "skin-btn" + (cur === idx || (idx < 0 && cur === undefined) ? " on" : "") + (idx >= 0 && !has ? " locked" : "") + (legend ? " legend" : "");
+      if (legend) b.style.setProperty("--glow", SKINS[cls][4].glow ?? "#ffd040");
+      b.append(heroSkinCanvas(cls, 0, idx < 0 ? undefined : idx));
+      const label = document.createElement("span");
+      label.textContent = idx < 0 ? "기본" : has ? SKINS[cls][idx].name.replace("전설: ", "") : `🔒 ${MASTERY_TIERS[idx]}`;
+      b.append(label);
+      b.title = idx < 0 ? "기본 모습" : `${idx + 1}단계 · ${SKINS[cls][idx].name}${has ? "" : ` (숙련도 ${MASTERY_TIERS[idx]} 필요)`}`;
+      b.disabled = idx >= 0 && !has;
+      b.onclick = () => net.send({ t: "skin", cls, idx });
+      return b;
+    };
+    list.append(mk(-1));
+    for (let i = 0; i < 5; i++) list.append(mk(i));
+    row.append(list);
     body.append(row);
   }
 }

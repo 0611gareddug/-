@@ -1,3 +1,4 @@
+import { SKINS } from "../shared/skins";
 import type { ClassId } from "../shared/classes";
 import { PLAYER_COLORS, TILE } from "../shared/constants";
 import type { SpriteBase, WorldDef } from "../shared/worlds";
@@ -244,6 +245,33 @@ export const CAPES: Record<string, string> = {
   warning: "#f0a020",
 };
 export const RAINBOW = ["#e84a4a", "#f0904a", "#f0c040", "#50d890", "#4aa0f0", "#a070f0"];
+
+/**
+ * v1.7 직업 스킨: 단계(0~4)가 오를수록 소품이 붙음
+ *  2단계 허리띠(x) · 3단계 어깨 장식(x) · 4단계 가슴 문양(z) · 5단계 밑단 장식(x)
+ */
+export function skinRows(cls: ClassId, frame: number, tier: number) {
+  const rows = heroRows(cls, frame).slice();
+  const head = HEADS[cls].length;
+  const set = (r: number, i: number, ch: string) => {
+    const row = rows[head + r];
+    if (row && row[i] !== "o" && row[i] !== ".") rows[head + r] = row.slice(0, i) + ch + row.slice(i + 1);
+  };
+  if (tier >= 1) { set(2, 4, "x"); set(2, 5, "x"); }
+  if (tier >= 2) { set(0, 3, "x"); set(0, 6, "x"); }
+  if (tier >= 3) { set(1, 4, "z"); set(1, 5, "z"); }
+  if (tier >= 4) { set(3, 3, "x"); set(3, 6, "x"); }
+  return rows;
+}
+export function skinPalette(cls: ClassId, color: number, tier: number, capeColor?: string): Palette {
+  const base = capeColor ? capedPalette(cls, color, capeColor) : heroPalette(cls, color);
+  return { ...base, ...(SKINS[cls]?.[tier]?.pal ?? {}) };
+}
+/** 스킨까지 입힌 캐릭터 그림 (로비·옷장·컷씬용) */
+export function heroSkinCanvas(cls: ClassId, color: number, tier?: number, scale = 1) {
+  if (tier === undefined || tier < 0) return paint(heroRows(cls, 0), heroPalette(cls, color), scale);
+  return paint(skinRows(cls, 0, tier), skinPalette(cls, color, tier), scale);
+}
 
 export function capedPalette(cls: ClassId, color: number, capeColor: string): Palette {
   return { ...heroPalette(cls, color), c: capeColor, C: shade(capeColor, -0.35) };

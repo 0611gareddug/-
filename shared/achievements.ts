@@ -14,7 +14,8 @@ export interface AchDef {
   rewards: Reward[];
 }
 
-export type Equip = Partial<Record<CosSlot, string>>;
+/** 코스튬 + v1.7 직업 스킨 번호(sk, 0~4, 지금 직업 기준) */
+export type Equip = Partial<Record<CosSlot, string>> & { sk?: number };
 
 export const SLOT_NAME: Record<CosSlot, string> = {
   hat: "모자",

@@ -9,7 +9,7 @@ import { LobbyPlay } from "./lobbyPlay";
 import { CLASS_IDS, type ClassId } from "../shared/classes";
 import type { ClientMsg, RoomMode, ServerMsg } from "../shared/protocol";
 import { Game } from "./game";
-import { canHardcore, cloudOn, flushStore, getCodex, getProfile, getRecords, getSave, initStore, savesFor, setEquip, unlockAch } from "./store";
+import { canHardcore, cloudOn, cosFor, flushStore, getCodex, getProfile, getRecords, getSave, initStore, savesFor, setEquip, setSkin, unlockAch } from "./store";
 import { ACHIEVEMENTS, SLOT_NAME, type Equip } from "../shared/achievements";
 
 // 개발 모드에선 Vite가 /ws 를 2567로 프록시하므로 PORT 환경변수를 무시한다
@@ -424,7 +424,7 @@ wss.on("connection", (ws) => {
       }
       room = target;
       const name = cleanName(msg.name);
-      me = { id: nextMemberId++, ws, name, color: 0, cls: "warrior", ready: false, cos: { ...getProfile(name).equip } };
+      me = { id: nextMemberId++, ws, name, color: 0, cls: "warrior", ready: false, cos: cosFor(name, "warrior") };
       room.add(me);
       return;
     }
@@ -433,7 +433,7 @@ wss.on("connection", (ws) => {
     const game = room.gameFor(me.id);
     switch (msg.t) {
       case "class":
-        if (!room.inGame && CLASS_IDS.includes(msg.cls)) { me.cls = msg.cls; room.sendLobby(); }
+        if (!room.inGame && CLASS_IDS.includes(msg.cls)) { me.cls = msg.cls; me.cos = cosFor(me.name, me.cls); room.sendLobby(); }
         break;
       case "ready":
         if (!room.inGame) { me.ready = !!msg.ready; room.sendLobby(); }
@@ -534,7 +534,7 @@ wss.on("connection", (ws) => {
           for (const a of ACHIEVEMENTS) unlockAch(me.name, a.id);
           room.send(me, { t: "toast", msg: "업적·코스튬을 전부 해금했어요" });
           const pr = getProfile(me.name);
-          room.send(me, { t: "profile", ach: pr.ach, equip: pr.equip, counters: pr.counters });
+          room.send(me, { t: "profile", ach: pr.ach, equip: pr.equip, counters: pr.counters, mastery: pr.mastery, skins: pr.skins });
           break;
         }
         if (game) game.handleCmd(me.id, msg.cmd);
@@ -542,15 +542,27 @@ wss.on("connection", (ws) => {
         break;
       case "profile": {
         const p = getProfile(me.name);
-        room.send(me, { t: "profile", ach: p.ach, equip: p.equip, counters: p.counters });
+        room.send(me, { t: "profile", ach: p.ach, equip: p.equip, counters: p.counters, mastery: p.mastery, skins: p.skins });
+        break;
+      }
+      case "skin": {
+        // v1.7 직업 스킨 (지금 직업이면 바로 보임)
+        if (!CLASS_IDS.includes(msg.cls)) break;
+        setSkin(me.name, msg.cls, Number(msg.idx));
+        me.cos = cosFor(me.name, me.cls);
+        room.gameFor(me.id)?.setCos(me.id, me.cos);
+        if (!room.inGame) room.sendLobby();
+        const ps = getProfile(me.name);
+        room.send(me, { t: "profile", ach: ps.ach, equip: ps.equip, counters: ps.counters, mastery: ps.mastery, skins: ps.skins });
         break;
       }
       case "equip": {
         if (!(msg.slot in SLOT_NAME)) break;
-        me.cos = setEquip(me.name, msg.slot, typeof msg.id === "string" ? msg.id : null);
+        setEquip(me.name, msg.slot, typeof msg.id === "string" ? msg.id : null);
+        me.cos = cosFor(me.name, me.cls);
         room.gameFor(me.id)?.setCos(me.id, me.cos);
         const p = getProfile(me.name);
-        room.send(me, { t: "profile", ach: p.ach, equip: p.equip, counters: p.counters });
+        room.send(me, { t: "profile", ach: p.ach, equip: p.equip, counters: p.counters, mastery: p.mastery, skins: p.skins });
         if (!room.inGame) room.sendLobby();
         break;
       }

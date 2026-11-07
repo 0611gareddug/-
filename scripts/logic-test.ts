@@ -1180,5 +1180,40 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   check("대장간: 카드마다 한 번만", fp.gold === 60);
 }
 
+// ---------- v1.7: 직업 마일스톤 스킨 ----------
+{
+  const st = await import("../server/store");
+  const { SKINS, MASTERY_TIERS, tierOf, masteryGain } = await import("../shared/skins");
+  const { CLASS_IDS: IDS17 } = await import("../shared/classes");
+  check("스킨: 9직업 × 5개, 5번째는 전설(빛)", IDS17.every((c) => SKINS[c].length === 5 && !!SKINS[c][4].glow && SKINS[c][4].name.startsWith("전설")));
+  check("마일스톤 단계 계산", tierOf(0) === 0 && tierOf(MASTERY_TIERS[0]) === 1 && tierOf(99999) === 5);
+  const nm = `스킨테스트${Date.now()}`;
+  st.setSkin(nm, "warrior", 0);
+  check("숙련도가 모자라면 스킨을 못 입음", st.cosFor(nm, "warrior").sk === undefined);
+  const r = st.addMastery(nm, "warrior", MASTERY_TIERS[1]);
+  check("숙련도 → 마일스톤 2단계", r.before === 0 && r.after === 2);
+  st.setSkin(nm, "warrior", 1);
+  check("열린 스킨 입기 + 직업마다 따로", st.cosFor(nm, "warrior").sk === 1 && st.cosFor(nm, "mage").sk === undefined);
+  st.setSkin(nm, "warrior", 4);
+  check("안 열린 전설 스킨은 못 입음", st.cosFor(nm, "warrior").sk === 1);
+  st.setSkin(nm, "warrior", -1);
+  check("기본 모습으로", st.cosFor(nm, "warrior").sk === undefined);
+  // 판이 끝나면 숙련도
+  const sent17: ServerMsg[] = [];
+  const gm = new Game([{ id: 1, name: nm, color: 0, cls: "ninja" }], () => {}, (_id, m) => sent17.push(m), () => {});
+  const GM = gm as any;
+  const np = gm.players.get(1)!;
+  np.kills = 120; np.dmgDealt = 15000;
+  GM.won = false;
+  GM.sendResults();
+  const ms = sent17.find((m) => m.t === "mastery") as Extract<ServerMsg, { t: "mastery" }> | undefined;
+  check("판 끝 숙련도 지급 (처치·피해·진행도)", !!ms && ms.cls === "ninja" && ms.gained === masteryGain({ kills: 120, dmgDealt: 15000, progress: 0, win: false }) && ms.gained > 0, `${ms?.gained}`);
+  const gc17 = new Game([{ id: 1, name: nm + "c", color: 0, cls: "ninja" }], () => {}, (_id, m) => sent17.push(m), () => {});
+  (gc17 as any).cmdUsed = true;
+  const before = sent17.length;
+  (gc17 as any).sendResults();
+  check("커맨드 쓴 판은 숙련도 없음", !sent17.slice(before).some((m) => m.t === "mastery"));
+}
+
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");
 process.exit(fails ? 1 : 0);
