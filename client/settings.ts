@@ -18,6 +18,8 @@ export interface Settings {
   bgmOn: boolean;
   /** PANIC 화면 가장자리 붉은 경고·흔들림 */
   panicFx: boolean;
+  /** 감자 모드: 이펙트 대부분 끄기 (저사양 컴퓨터용) */
+  potato: boolean;
 }
 
 export const KEY_LABEL: Record<KeyAction, string> = {
@@ -43,6 +45,7 @@ const DEFAULTS: Settings = {
   bgmVolume: 0.6,
   bgmOn: false,
   panicFx: true,
+  potato: false,
 };
 
 const STORAGE_KEY = "osin-settings";

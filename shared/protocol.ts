@@ -123,7 +123,8 @@ export interface SnapPlayer {
   spd: number;
   /** 스킬 1~4 남은 쿨타임 */
   cds: number[];
-  cdm: number[];
+  /** 스킬 최대 쿨타임 — 바뀔 때만 옴 */
+  cdm?: number[];
   lv: number;
   xp: number;
   xpn: number;
@@ -223,6 +224,18 @@ export interface Fx {
   to?: number;
   /** zap/line/blink: 끝점들 [x1,y1,x2,y2...] */
   pts?: number[];
+}
+
+/**
+ * 몬스터 전송 형식 (v1.2 최적화): [id, x, y, hp] 또는 [id, x, y, hp, 추가정보]
+ * 추가정보(k·mhp·el)는 처음 보일 때 · 2초마다 전체 · 값이 있을 때만 (f·sp·st·ca·dps·tot)
+ */
+export type MonWire = [number, number, number, number] | [number, number, number, number, Partial<SnapMonster>];
+/** 투사체 전송 형식: [id, x, y, 각도×100] 또는 [..., 종류] (종류는 처음 보일 때만) */
+export type ProjWire = [number, number, number, number] | [number, number, number, number, ProjKind];
+export interface SnapshotWire extends Omit<Snapshot, "monsters" | "projs"> {
+  mz: MonWire[];
+  pz: ProjWire[];
 }
 
 export interface Snapshot {
@@ -416,7 +429,7 @@ export type ServerMsg =
       records: Leaderboards;
     }
   | { t: "stage"; stage: StageInfo }
-  | Snapshot
+  | SnapshotWire
   | { t: "cards"; options: string[]; time: number; left: number }
   /** 자유 채팅 (같은 방 전원) */
   | { t: "chat"; id: number; name: string; color: number; text: string }

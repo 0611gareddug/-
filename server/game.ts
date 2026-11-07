@@ -9,7 +9,7 @@ import {
 } from "../shared/cards";
 import { isWallAt, moveCircle, tileAt } from "../shared/collide";
 import type {
-  Award, CmdAction, DescentMod, EliteAbility, PanicMission, Fx, GachaTier, GambleGame, InputState, ResultRow, RoomMode, ServerMsg, SnapZone,
+  Award, CmdAction, DescentMod, MonWire, ProjWire, SnapMonster, EliteAbility, PanicMission, Fx, GachaTier, GambleGame, InputState, ResultRow, RoomMode, ServerMsg, SnapZone,
   StageInfo, StageKind, ZoneKind,
 } from "../shared/protocol";
 import {
@@ -933,6 +933,9 @@ export class Game {
     this.lastStage = info;
     this.sentCards.clear();
     this.sentCos.clear();
+    this.sentCdm.clear();
+    this.sentMon.clear();
+    this.sentProj.clear();
     this.broadcast({ t: "stage", stage: info });
     if (kind === "rest") this.sendRestStatus();
   }
@@ -970,6 +973,7 @@ export class Game {
       log: [], total: 0, elite, blinkCd: 4,
     };
     this.monsters.push(m);
+    if (elite === "guard") this.guards.push(m);
     return m;
   }
 
@@ -1394,6 +1398,58 @@ export class Game {
       timeUp: this.timeUp || undefined,
     });
     this.onEnd();
+  }
+
+  /** v1.2 몬스터 압축: 변하지 않는 정보(종류·최대 체력·엘리트)는 처음 · 2초마다만 */
+  private monsterWire(full: boolean): MonWire[] {
+    const out: MonWire[] = [];
+    const seen = new Map<number, number>();
+    for (const m of this.monsters) {
+      if (m.kind === "pvp") continue;
+      let st = "";
+      if (m.stunT > 0) st += "s";
+      if (m.frozenT > 0) st += "z";
+      if (m.rootT > 0) st += "r";
+      if (m.slowT > 0) st += "w";
+      if (m.poisonT > 0) st += "p";
+      if ((m.curseT ?? 0) > 0) st += "c";
+      const ex: Partial<SnapMonster> = {};
+      let any = false;
+      if (full || this.sentMon.get(m.id) !== m.mhp) {
+        ex.k = m.kind; ex.mhp = m.mhp;
+        if (m.elite) ex.el = m.elite;
+        any = true;
+      }
+      if (m.flashT > 0) { ex.f = true; any = true; }
+      if (m.spawnT > 0) { ex.sp = Math.round(m.spawnT * 10) / 10; any = true; }
+      if (st) { ex.st = st; any = true; }
+      if (m.windT > 0) { ex.ca = Math.round(m.rushA * 100) / 100; any = true; }
+      if (m.kind === "dummy") {
+        ex.dps = Math.round(m.log.reduce((a, e) => a + e.d, 0) / 5);
+        ex.tot = Math.round(m.total);
+        any = true;
+      }
+      const hp = Math.ceil(m.hp);
+      out.push(any ? [m.id, Math.round(m.x), Math.round(m.y), hp, ex] : [m.id, Math.round(m.x), Math.round(m.y), hp]);
+      seen.set(m.id, m.mhp);
+    }
+    this.sentMon = seen;
+    return out;
+  }
+
+  /** v1.2 투사체 압축: 좌표는 정수, 종류는 처음 보일 때만 */
+  private projWire(full: boolean): ProjWire[] {
+    const out: ProjWire[] = [];
+    const seen = new Set<number>();
+    for (const pr of this.projs) {
+      const a = Math.round(Math.atan2(pr.vy, pr.vx) * 100);
+      out.push(full || !this.sentProj.has(pr.id)
+        ? [pr.id, Math.round(pr.x), Math.round(pr.y), a, pr.kind]
+        : [pr.id, Math.round(pr.x), Math.round(pr.y), a]);
+      seen.add(pr.id);
+    }
+    this.sentProj = seen;
+    return out;
   }
 
   /** 값이 바뀌었으면 (또는 full) true 를 돌려주고 기억 */
@@ -1939,7 +1995,9 @@ export class Game {
     this.updatePets();
     if (!this.gemMode) this.updateRevives();
     for (const m of [...this.monsters]) this.updateMonster(m);
+    this.guards = this.monsters.filter((m) => m.elite === "guard");
     this.separateMonsters();
+    this.buildGrid();
     this.updateProjs();
     this.updateZones();
 
@@ -2841,24 +2899,42 @@ export class Game {
   }
 
   private separateMonsters() {
-    const ms = this.monsters;
-    for (let i = 0; i < ms.length; i++) {
-      for (let j = i + 1; j < ms.length; j++) {
-        const a = ms[i], b = ms[j];
-        if (a.kind === "pvp" || b.kind === "pvp") continue;
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const min = a.r + b.r;
-        // 빠른 거르기: 상자 범위 밖이면 거리 계산 안 함
-        if (dx > min || dx < -min || dy > min || dy < -min) continue;
-        const d = Math.hypot(dx, dy) || 0.01;
-        if (d >= min) continue;
-        const push = (min - d) / 2;
-        const ux = dx / d, uy = dy / d;
-        const fixed = (m: Monster) => !!m.def.boss || m.def.ai === "turret";
-        if (!fixed(a)) this.moveMonster(a, -ux * push, -uy * push);
-        if (!fixed(b)) this.moveMonster(b, ux * push, uy * push);
+    // v1.2: 같은 칸·이웃 칸끼리만 비교하고, 밀리는 양은 모았다가 몬스터마다 한 번만 이동 (벽 계산 1회)
+    this.buildGrid();
+    const push = new Map<Monster, { x: number; y: number }>();
+    const add = (m: Monster, x: number, y: number) => {
+      const p = push.get(m);
+      if (p) { p.x += x; p.y += y; } else push.set(m, { x, y });
+    };
+    const fixed = (m: Monster) => !!m.def.boss || m.def.ai === "turret";
+    const C = Game.CELL;
+    for (const [key, cell] of this.grid) {
+      const cx = Math.floor(key / 4096), cy = key - cx * 4096;
+      // 자기 칸 + 오른쪽·아래쪽 이웃 4칸만 (쌍을 두 번 세지 않게)
+      for (const [ox, oy] of [[0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) {
+        const other = ox === 0 && oy === 0 ? cell : this.grid.get(this.cellKey(cx + ox, cy + oy));
+        if (!other) continue;
+        for (let i = 0; i < cell.length; i++) {
+          const a = cell[i];
+          if (a.kind === "pvp") continue;
+          for (let j = ox === 0 && oy === 0 ? i + 1 : 0; j < other.length; j++) {
+            const b = other[j];
+            if (b.kind === "pvp") continue;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const min = a.r + b.r;
+            if (dx > min || dx < -min || dy > min || dy < -min) continue;
+            const d2 = dx * dx + dy * dy;
+            if (d2 >= min * min) continue;
+            const d = Math.sqrt(d2) || 0.01;
+            const s = (min - d) / 2 / d;
+            if (!fixed(a)) add(a, -dx * s, -dy * s);
+            if (!fixed(b)) add(b, dx * s, dy * s);
+          }
+        }
       }
     }
+    void C;
+    for (const [m, p] of push) this.moveMonster(m, p.x, p.y);
   }
 
   private updateProjs() {
@@ -2892,9 +2968,9 @@ export class Game {
       }
       const owner = pr.fromPlayer ? this.players.get(pr.ownerId) : undefined;
       if (!dead && pr.fromPlayer) {
-        // (몬스터가 죽으면 this.monsters 는 새 배열로 바뀌므로 복사 없이 순회해도 안전)
-        for (const m of this.monsters) {
-          if (m.spawnT > 0 || pr.hit.has(m.id)) continue;
+        // v1.2: 격자에서 주변 몬스터만 후보로 (이미 죽은 몹은 hp로 거름)
+        for (const m of this.nearMonsters(pr.x, pr.y, pr.hitR + 26, this.nearBuf).slice()) {
+          if (m.spawnT > 0 || pr.hit.has(m.id) || (m.hp <= 0 && m.kind !== "dummy")) continue;
           const reach = m.r + pr.hitR;
           const ddx = m.x - pr.x, ddy = m.y - pr.y;
           if (ddx > reach || ddx < -reach || ddy > reach || ddy < -reach) continue;
@@ -3179,7 +3255,7 @@ export class Game {
       }
     }
     // 엘리트 보호막: 근처(60) 다른 몹은 받는 피해 절반
-    if (this.monsters.some((o) => o !== m && o.elite === "guard" && Math.hypot(o.x - m.x, o.y - m.y) < 60)) dmg *= 0.5;
+    if (this.guards.length && this.guards.some((o) => o !== m && o.hp > 0 && this.monsters.includes(o) && Math.hypot(o.x - m.x, o.y - m.y) < 60)) dmg *= 0.5;
     const dealt = Math.min(m.hp, dmg);
     m.hp -= dmg;
     m.dmgBy.set(p.id, (m.dmgBy.get(p.id) ?? 0) + dealt);
@@ -3315,6 +3391,44 @@ export class Game {
   /** 플레이어별로 마지막에 보낸 카드·코스튬 (바뀔 때만 다시 보냄) */
   private sentCards = new Map<number, string>();
   private sentCos = new Map<number, string>();
+  private sentCdm = new Map<number, string>();
+
+  /** v1.2: 몬스터 공간 격자 (32px 칸) — 밀어내기·투사체 판정을 주변 칸만 검사 */
+  private grid = new Map<number, Monster[]>();
+  private static readonly CELL = 32;
+  private cellKey(cx: number, cy: number) {
+    return cx * 4096 + cy;
+  }
+  private buildGrid() {
+    this.grid.clear();
+    const C = Game.CELL;
+    for (const m of this.monsters) {
+      const k = this.cellKey(Math.floor(m.x / C), Math.floor(m.y / C));
+      const cell = this.grid.get(k);
+      if (cell) cell.push(m);
+      else this.grid.set(k, [m]);
+    }
+  }
+  /** (x, y) 반경 r 안에 걸칠 수 있는 몬스터 후보 */
+  private nearMonsters(x: number, y: number, r: number, out: Monster[]) {
+    out.length = 0;
+    const C = Game.CELL;
+    const x0 = Math.floor((x - r) / C), x1 = Math.floor((x + r) / C);
+    const y0 = Math.floor((y - r) / C), y1 = Math.floor((y + r) / C);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cy = y0; cy <= y1; cy++) {
+        const cell = this.grid.get(this.cellKey(cx, cy));
+        if (cell) for (const m of cell) out.push(m);
+      }
+    }
+    return out;
+  }
+  private nearBuf: Monster[] = [];
+  /** 이번 틱의 '보호막' 엘리트 (없으면 피해 계산 때 전체 검색을 안 함) */
+  private guards: Monster[] = [];
+  /** 지난 스냅샷에 보낸 몬스터(id → mhp) · 투사체 id */
+  private sentMon = new Map<number, number>();
+  private sentProj = new Set<number>();
 
   private sendSnapshot(force = false) {
     // 매 틱이 아니라 2틱에 한 번만 보냄 (네트워크 절반). 이펙트는 그동안 모였다가 같이 감
@@ -3343,7 +3457,7 @@ export class Game {
           dash: p.dashT > 0, dc: p.dashLeft, f: p.flashT > 0, at: p.atkAnimT > 0,
           spd: CLASSES[p.cls].speed * p.stats.speedMul * (p.slowT > 0 ? 0.6 : 1) * (this.prankFastT > 0 ? 1.4 : 1) * (this.gem.holder === p.id ? 0.85 : 1),
           cds: p.cds.map((c) => Math.round(c * 10) / 10),
-          cdm: CLASSES[p.cls].skills.map((s, i) => (this.isRest ? 0.3 : Math.round(skillCd(s.cd, p.stats, i) * 10) / 10)),
+          cdm: ((c) => (this.changed(this.sentCdm, p.id, c.join(","), full) ? c : undefined))(CLASSES[p.cls].skills.map((s, i) => (this.isRest ? 0.3 : Math.round(skillCd(s.cd, p.stats, i) * 10) / 10))),
           lv: p.level, xp: Math.floor(p.xp), xpn: xpToNext(p.level), gold: p.gold,
           shield: Math.ceil(p.shield), giant: p.giantT > 0,
           size: Math.round(p.stats.sizeMul * (p.giantT > 0 ? 2 : 1) * 100) / 100,
@@ -3352,28 +3466,8 @@ export class Game {
           cards: this.changed(this.sentCards, p.id, p.cards.join(","), full) ? p.cards : undefined,
         };
       }),
-      monsters: this.monsters.filter((m) => m.kind !== "pvp").map((m) => {
-        let st = "";
-        if (m.stunT > 0) st += "s";
-        if (m.frozenT > 0) st += "z";
-        if (m.rootT > 0) st += "r";
-        if (m.slowT > 0) st += "w";
-        if (m.poisonT > 0) st += "p";
-        if ((m.curseT ?? 0) > 0) st += "c";
-        const base = {
-          // 데이터 절약: 좌표는 정수, 기본값(false·0·"")은 아예 안 보냄 (클라이언트가 채움)
-          id: m.id, k: m.kind, x: Math.round(m.x), y: Math.round(m.y), hp: Math.ceil(m.hp), mhp: m.mhp,
-          f: m.flashT > 0 || undefined, sp: m.spawnT > 0 ? Math.round(m.spawnT * 10) / 10 : undefined, st: st || undefined,
-          ca: m.windT > 0 ? Math.round(m.rushA * 100) / 100 : undefined,
-          el: m.elite,
-        };
-        if (m.kind !== "dummy") return base;
-        const recent = m.log.reduce((a, e) => a + e.d, 0);
-        return { ...base, dps: Math.round(recent / 5), tot: Math.round(m.total) };
-      }),
-      projs: this.projs.map((pr) => ({
-        id: pr.id, k: pr.kind, x: round1(pr.x), y: round1(pr.y), a: Math.round(Math.atan2(pr.vy, pr.vx) * 100) / 100,
-      })),
+      mz: this.monsterWire(full),
+      pz: this.projWire(full),
       pets: this.pets.map((pt) => ({
         id: pt.id, owner: pt.ownerId, x: round1(pt.x), y: round1(pt.y),
         k: pt.kind,

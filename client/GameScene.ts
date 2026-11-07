@@ -387,7 +387,7 @@ export class GameScene extends Phaser.Scene {
     img.setTexture(mimic ? "mimic" : "chest_open");
     if (mimic) {
       this.tweens.add({ targets: img, angle: { from: -8, to: 8 }, duration: 70, yoyo: true, repeat: 12, onComplete: () => img.setAngle(0) });
-      this.cameras.main.shake(300, 0.01);
+      this.shake(300, 0.01);
     } else {
       this.tweens.add({ targets: img, scale: 2.4, duration: 120, yoyo: true });
     }
@@ -413,19 +413,21 @@ export class GameScene extends Phaser.Scene {
     this.fog = null;
     for (const w of this.weather) w.o.destroy();
     this.weather = [];
+    // 감자 모드: 날씨 입자 없음 (모래폭풍 어두워짐만)
+    const potato = settings.potato;
     if (g === "sandstorm") {
       this.overlay = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0xc8a060, 0).setOrigin(0).setScrollFactor(0).setDepth(200000);
-      for (let i = 0; i < 70; i++) {
+      for (let i = 0; i < (potato ? 0 : 70); i++) {
         const o = this.add.rectangle(Math.random() * VIEW_W, Math.random() * VIEW_H, 3, 1, 0xf0d8a0, 0).setScrollFactor(0).setDepth(200001);
         this.weather.push({ o, vx: 180 + Math.random() * 120, vy: 20 + Math.random() * 30 });
       }
     } else if (g === "ice") {
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < (potato ? 0 : 60); i++) {
         const o = this.add.rectangle(Math.random() * VIEW_W, Math.random() * VIEW_H, 1, 1, 0xffffff, 0.8).setScrollFactor(0).setDepth(200001);
         this.weather.push({ o, vx: -10 + Math.random() * 20, vy: 18 + Math.random() * 20 });
       }
     } else if (g === "lava") {
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < (potato ? 0 : 30); i++) {
         const o = this.add.rectangle(Math.random() * VIEW_W, Math.random() * VIEW_H, 1, 1, 0xf08030, 0.8).setScrollFactor(0).setDepth(200001);
         this.weather.push({ o, vx: -5 + Math.random() * 10, vy: -(10 + Math.random() * 20) });
       }
@@ -1016,14 +1018,14 @@ export class GameScene extends Phaser.Scene {
     }
     // 코스튬: 발자국
     const trail = p.cos?.trail ? TRAILS[p.cos.trail] : undefined;
-    if (trail && moved && !p.ghost && now - (this.trailT.get(p.id) ?? 0) > 110) {
+    if (trail && !settings.potato && moved && !p.ghost && now - (this.trailT.get(p.id) ?? 0) > 110) {
       this.trailT.set(p.id, now);
       const col = trail[Math.floor(now / 110) % trail.length];
       const dot = this.track(this.add.rectangle(Math.round(x) + Math.round((Math.random() - 0.5) * 4), Math.round(y) + 4, 2, 2, col).setDepth(y - 1));
       this.tweens.add({ targets: dot, alpha: 0, duration: 700, onComplete: () => dot.destroy() });
     }
     // 바드 연주 중: 음표가 둥실
-    if (p.song && !p.ghost && now - (this.songT.get(p.id) ?? 0) > 380) {
+    if (p.song && !settings.potato && !p.ghost && now - (this.songT.get(p.id) ?? 0) > 380) {
       this.songT.set(p.id, now);
       this.floatText(Math.round(x) + Math.round((Math.random() - 0.5) * 16), Math.round(y) - 14, "♪", "#f8e070", 900);
     }
@@ -1163,7 +1165,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------- 이펙트 ----------
+  /** 감자 모드면 화면 흔들림 없음 */
+  private shake(duration: number, intensity: number) {
+    if (!settings.potato) this.cameras.main.shake(duration, intensity);
+  }
+
   private pixelBurst(x: number, y: number, n: number, colors: number[], spread: number, life: number) {
+    if (settings.potato) return;
     for (let i = 0; i < n; i++) {
       const col = colors[i % colors.length];
       const px = this.track(this.add.rectangle(x, y, 2, 2, col).setDepth(y + 20));
@@ -1177,6 +1185,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private ring(x: number, y: number, r: number, color: number, life: number, fill = false) {
+    if (settings.potato) return;
     const c = this.track(this.add.circle(x, y, r, color, fill ? 0.35 : 0).setDepth(y + 30));
     if (!fill) c.setStrokeStyle(1, color, 1);
     c.setScale(0.2);
@@ -1208,6 +1217,12 @@ export class GameScene extends Phaser.Scene {
 
   private playFx(f: Fx, s: Snapshot) {
     this.fxSound(f.k);
+    if (settings.potato) {
+      // 감자 모드: 소리와 숫자만 (파티클·고리·잔상·멈칫·흔들림 없음)
+      if (f.k === "num") this.floatText(f.x, f.y, `${f.r}`, "#ffffff", 600);
+      else if (f.k === "crit" && f.r) this.floatText(f.x, f.y - 6, `${f.r}!`, "#f8e070");
+      return;
+    }
     switch (f.k) {
       case "hit":
         this.pixelBurst(f.x, f.y - 4, 3, [0xffffff, 0xfff0a0], 7, 180);
@@ -1218,7 +1233,7 @@ export class GameScene extends Phaser.Scene {
         this.punchAt(f.x, f.y);
         // 타격감: 치명타는 살짝 멈칫 + 흔들림
         this.hitStopUntil = Math.max(this.hitStopUntil, performance.now() + 45);
-        this.cameras.main.shake(80, 0.003);
+        this.shake(80, 0.003);
         if (f.r) this.floatText(f.x + (Math.random() * 8 - 4), f.y - 6, `${f.r}!`, "#f8e070");
         break;
       case "num":
@@ -1229,9 +1244,9 @@ export class GameScene extends Phaser.Scene {
         if ((f.r ?? 0) >= 14) {
           // 보스 처치: 크게 멈칫 + 크게 흔들림
           this.hitStopUntil = Math.max(this.hitStopUntil, performance.now() + 160);
-          this.cameras.main.shake(400, 0.012);
+          this.shake(400, 0.012);
         } else {
-          this.cameras.main.shake(50, 0.0015);
+          this.shake(50, 0.0015);
         }
         break;
       case "swing": {
@@ -1249,7 +1264,7 @@ export class GameScene extends Phaser.Scene {
       case "boom":
         this.ring(f.x, f.y, f.r ?? 18, 0xf08030, 300, true);
         this.pixelBurst(f.x, f.y, 10, [0xf8c040, 0xf08030, 0xffffff], f.r ?? 18, 350);
-        if ((f.r ?? 0) > 40) this.cameras.main.shake(120, 0.006);
+        if ((f.r ?? 0) > 40) this.shake(120, 0.006);
         break;
       case "heal":
         this.ring(f.x, f.y, f.r ?? 60, 0x50e080, 450, true);
@@ -1268,11 +1283,11 @@ export class GameScene extends Phaser.Scene {
         break;
       case "pdie":
         this.pixelBurst(f.x, f.y - 6, 14, [0xffffff, 0xf8e070, 0xe84a4a], 20, 600);
-        this.cameras.main.shake(150, 0.004);
+        this.shake(150, 0.004);
         break;
       case "fall":
         this.pixelBurst(f.x, f.y, 10, [0xffffff, 0xc8d8f8], 12, 400);
-        if (s.players.some((p) => p.id === this.myId && Math.hypot(p.x - f.x, p.y - f.y) < 30)) this.cameras.main.shake(150, 0.005);
+        if (s.players.some((p) => p.id === this.myId && Math.hypot(p.x - f.x, p.y - f.y) < 30)) this.shake(150, 0.005);
         break;
       case "bolt": {
         // 낙뢰: 하늘에서 내리꽂는 번개
@@ -1367,7 +1382,7 @@ export class GameScene extends Phaser.Scene {
         g.lineStyle((f.r ?? 10) * 2, 0xd8a050, 0.6).lineBetween(f.x, f.y, ex, ey);
         g.lineStyle(2, 0xffffff, 0.9).lineBetween(f.x, f.y, ex, ey);
         this.tweens.add({ targets: g, alpha: 0, duration: 300, onComplete: () => g.destroy() });
-        this.cameras.main.shake(100, 0.004);
+        this.shake(100, 0.004);
         break;
       }
       case "blink": {

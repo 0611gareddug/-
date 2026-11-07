@@ -426,7 +426,7 @@ function renderSettings(body: HTMLElement) {
     d.textContent = title;
     body.append(d);
   };
-  const toggle = (label: string, key: "aimBar" | "skillRange" | "chargeLine" | "sound" | "panicFx" | "bgmOn") => {
+  const toggle = (label: string, key: "aimBar" | "skillRange" | "chargeLine" | "sound" | "panicFx" | "bgmOn" | "potato") => {
     const l = document.createElement("label");
     l.className = "check";
     const cb = document.createElement("input");
@@ -464,6 +464,9 @@ function renderSettings(body: HTMLElement) {
   slider("효과음", "sfxVolume");
   slider("배경음악", "bgmVolume");
   toggle("PANIC 화면 가장자리 붉은 경고·흔들림", "panicFx");
+
+  sec("성능");
+  toggle("🥔 감자 모드 — 파티클·화면 흔들림·잔상·날씨 등 이펙트 대부분 끄기 (저사양 컴퓨터용)", "potato");
 
   sec("스킬 조준 방식");
   for (const [v, label] of [["hold", "누른 채 클릭하면 시전 (키를 떼면 취소)"], ["instant", "누르면 바로 마우스 위치에 시전"]] as const) {

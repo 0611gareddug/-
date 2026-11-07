@@ -5,7 +5,7 @@ import Phaser from "phaser";
 import { CLASSES, CLASS_IDS, SKILL_UNLOCK, type ClassId } from "../shared/classes";
 import { CARD_BY_ID, GACHA_PRICE, RARITY_NAME } from "../shared/cards";
 import { MARKET_RANGE, PLAYER_COLORS, ROUNDS_PER_WORLD, VIEW_H, VIEW_W } from "../shared/constants";
-import { GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
+import { type SnapMonster, type SnapProj, type SnapshotWire, GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
 import { DIFFS, MONSTERS, WORLDS, WORLD_COUNT, diffDmgMul, diffHpMul, diffName } from "../shared/worlds";
 import { initMenu, isCapturingKey, isMenuOpen, onCodex, onProfile, setAdmin, toggleMenu } from "./menu";
 import { ACH_BY_ID, titleName } from "../shared/achievements";
@@ -447,7 +447,7 @@ function updateHud(s: Snapshot) {
       } else if (cd > 0) {
         const fill = document.createElement("div");
         fill.className = "cdfill";
-        fill.style.height = `${Math.min(100, (cd / (me.cdm[i] || 1)) * 100)}%`;
+        fill.style.height = `${Math.min(100, (cd / (me.cdm?.[i] || 1)) * 100)}%`;
         const v = document.createElement("div");
         v.className = "cdv";
         v.textContent = cd >= 1 ? `${Math.ceil(cd)}` : cd.toFixed(1);
@@ -539,6 +539,61 @@ function updateHud(s: Snapshot) {
       <div class="bar"><i style="width:${ratio * 100}%"></i></div>`;
     team.append(el);
   }
+}
+
+
+// ---------- v1.2 스냅샷 압축 풀기 ----------
+const monCache = new Map<number, { k: string; mhp: number; el?: SnapMonster["el"] }>();
+const projCache = new Map<number, SnapProj["k"]>();
+let lastCdm = new Map<number, number[]>();
+function decodeSnap(w: SnapshotWire): Snapshot {
+  const monsters: SnapMonster[] = [];
+  const seenM = new Set<number>();
+  for (const t of w.mz) {
+    const [id, x, y, hp, ex] = t as [number, number, number, number, Partial<SnapMonster>?];
+    let c = monCache.get(id);
+    if (ex?.k) { c = { k: ex.k, mhp: ex.mhp ?? c?.mhp ?? hp, el: ex.el }; monCache.set(id, c); }
+    seenM.add(id);
+    if (!c) continue; // 종류를 아직 모름 (늦게 들어온 경우 2초 안에 채워짐)
+    monsters.push({ id, k: c.k, x, y, hp, mhp: c.mhp, el: c.el, f: ex?.f ?? false, sp: ex?.sp ?? 0, st: ex?.st ?? "", ca: ex?.ca, dps: ex?.dps, tot: ex?.tot });
+  }
+  for (const id of monCache.keys()) if (!seenM.has(id)) monCache.delete(id);
+  const projs: SnapProj[] = [];
+  const seenP = new Set<number>();
+  for (const t of w.pz) {
+    const [id, x, y, a, k] = t as [number, number, number, number, SnapProj["k"]?];
+    if (k) projCache.set(id, k);
+    seenP.add(id);
+    const kind = projCache.get(id);
+    if (kind) projs.push({ id, k: kind, x, y, a: a / 100 });
+  }
+  for (const id of projCache.keys()) if (!seenP.has(id)) projCache.delete(id);
+  // 스킬 최대 쿨타임은 바뀔 때만 옴
+  const cdm = new Map<number, number[]>();
+  for (const p of w.players) {
+    const v = (p.cdm as number[] | undefined) ?? lastCdm.get(p.id) ?? [1, 1, 1, 1];
+    p.cdm = v;
+    cdm.set(p.id, v);
+  }
+  lastCdm = cdm;
+  const { mz: _mz, pz: _pz, ...rest } = w;
+  return { ...rest, monsters, projs };
+}
+
+function handleSnap(m: Snapshot) {
+  // 서버는 카드·코스튬을 바뀔 때만 보냄 → 이전 값으로 채움
+  if (lastSnap) {
+    for (const p of m.players) {
+      const prev = lastSnap.players.find((q) => q.id === p.id);
+      if (!p.cards) p.cards = prev?.cards ?? [];
+      if (p.cos === undefined) p.cos = prev?.cos;
+    }
+  } else {
+    for (const p of m.players) p.cards ??= [];
+  }
+  scene?.pushSnapshot(m);
+  if (visible("market")) $("market-gold").textContent = `${m.players.find((p) => p.id === myId)?.gold ?? 0}원`;
+  $("cmd-badge").classList.toggle("hidden", !m.cmd);
 }
 
 // ---------- 카드 선택 ----------
@@ -1207,23 +1262,12 @@ net.onMessage = async (m: ServerMsg) => {
       }
       break;
     }
-    case "snap":
-      // 몬스터 기본값 채우기 (서버가 데이터를 줄이려고 생략함)
-      for (const mo of m.monsters) { mo.st ??= ""; mo.sp ??= 0; mo.f ??= false; }
-      // 서버는 카드·코스튬을 바뀔 때만 보냄 → 이전 값으로 채움
-      if (lastSnap) {
-        for (const p of m.players) {
-          const prev = lastSnap.players.find((q) => q.id === p.id);
-          if (!p.cards) p.cards = prev?.cards ?? [];
-          if (p.cos === undefined) p.cos = prev?.cos;
-        }
-      } else {
-        for (const p of m.players) p.cards ??= [];
-      }
-      scene?.pushSnapshot(m);
-      if (visible("market")) $("market-gold").textContent = `${m.players.find((p) => p.id === myId)?.gold ?? 0}원`;
-      $("cmd-badge").classList.toggle("hidden", !m.cmd);
+    case "snap": {
+      // v1.2: 압축된 몬스터·투사체를 풀어서 원래 모양으로
+      const snap = decodeSnap(m);
+      handleSnap(snap);
       break;
+    }
     case "trialVote":
       $("trial-status").textContent = "";
       show("hud", "trial");
