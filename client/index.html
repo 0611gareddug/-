@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>양배추 용사단!</title>
+  </head>
+  <body>
+    <div id="game"></div>
+    <!-- 채팅 말풍선 (화면 해상도 그대로) -->
+    <div id="chat-bubbles" class="chat-bubbles"></div>
+
+    <!-- 타이틀 -->
+    <section id="title" class="screen">
+      <div class="panel title-panel">
+        <h1 class="logo">양배추 용사단!</h1>
+        <p class="sub">친구들과 함께하는 엉성한 던전 원정</p>
+        <label class="field">닉네임<input id="name" maxlength="10" placeholder="용사 이름" /></label>
+        <button id="btn-create" class="btn primary">방 만들기</button>
+        <div class="row">
+          <input id="code" maxlength="4" placeholder="방 코드" />
+          <button id="btn-join" class="btn">입장</button>
+        </div>
+        <p id="title-error" class="error"></p>
+      </div>
+    </section>
+
+    <!-- 로비 -->
+    <section id="lobby" class="screen hidden">
+      <div class="panel lobby-panel">
+        <div class="lobby-head">
+          <div>
+            <div class="muted">방 코드</div>
+            <div id="room-code" class="room-code">----</div>
+          </div>
+          <button id="btn-copy" class="btn small">초대 링크 복사</button>
+        </div>
+        <div id="slots" class="slots"></div>
+        <div class="muted">직업 선택 <span class="muted">(마우스를 올리면 스킬 4개 확인)</span></div>
+        <div id="classes" class="classes"></div>
+        <div class="lobby-cols">
+          <div class="lobby-col">
+            <div class="muted">모드</div>
+            <div id="mode-box" class="mode-box"></div>
+            <div id="save-box" class="save-box"></div>
+          </div>
+          <div class="lobby-col">
+            <div class="rec-head">
+              <span id="rec-title" class="muted">순위</span>
+            </div>
+            <div id="records" class="records"></div>
+          </div>
+        </div>
+        <div class="lobby-foot">
+          <button id="btn-ready" class="btn">준비</button>
+          <button id="btn-start" class="btn primary">시작</button>
+        </div>
+        <p id="lobby-hint" class="muted center"></p>
+        <!-- 로비 미니게임: 양배추 축구 -->
+        <div class="lobby-play">
+          <div class="lp-head">
+            <span class="lp-team l">왼쪽 팀 <b id="lp-s0">0</b></span>
+            <span class="muted">양배추 축구 · WASD 이동 · Space 밀치기</span>
+            <span class="lp-team r"><b id="lp-s1">0</b> 오른쪽 팀</span>
+          </div>
+          <canvas id="lobby-field" width="392" height="170"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- 인게임 HUD -->
+    <section id="hud" class="hidden">
+      <div id="hud-me" class="box hud-me"></div>
+      <div id="hud-stage" class="box hud-stage"></div>
+      <div id="hud-timer" class="box hud-timer hidden"></div>
+      <div id="side-board" class="box side-board hidden"></div>
+      <div id="boss-bar" class="boss-bar hidden"><div id="boss-name"></div><div class="bar"><i></i></div></div>
+      <div id="hud-team" class="hud-team"></div>
+      <div id="rest-bar" class="box rest-bar hidden">
+        <span id="rest-text"></span>
+        <button id="btn-rest-ready" class="btn small">준비 완료 (Enter)</button>
+      </div>
+      <div id="hud-cards" class="hud-cards"></div>
+      <div id="skill-bar" class="skill-bar"></div>
+      <div id="hud-msg" class="box hud-msg hidden"></div>
+      <div id="hud-help" class="hud-help"></div>
+      <!-- PANIC -->
+      <div id="panic-timer" class="panic-timer hidden"><div id="pt-zone" class="pt-zone"></div><div id="pt-num" class="pt-num"></div><div id="pt-bar" class="pt-bar"><i></i></div></div>
+      <div id="panic-prog" class="box panic-prog hidden"></div>
+      <div id="panic-mission" class="box panic-mission hidden"></div>
+      <div id="panic-banner" class="panic-banner hidden"></div>
+      <div id="panic-complete" class="panic-complete hidden"></div>
+    </section>
+    <div id="panic-edge" class="panic-edge hidden"></div>
+
+    <!-- 카드 선택 -->
+    <!-- 자유 채팅: / 로 열고 닫기 -->
+    <div id="chat" class="chat">
+      <div id="chat-log" class="chat-log"></div>
+      <input id="chat-input" class="chat-input hidden" maxlength="80" autocomplete="off" placeholder="메시지 입력 · Enter 보내기 · / 닫기" />
+    </div>
+
+    <section id="cards" class="screen dim hidden">
+      <div class="cards-title">카드 1장을 고르세요 <span id="cards-left"></span><span id="cards-timer"></span></div>
+      <div class="cards-wrap">
+        <div id="card-list" class="card-list"></div>
+        <div id="talent-tree" class="talent-tree hidden"></div>
+      </div>
+      <div id="cards-status" class="muted center"></div>
+    </section>
+
+    <!-- 팀카드 투표 -->
+    <section id="vote" class="screen dim hidden">
+      <div class="cards-title">팀카드 투표! 팀 전원에게 적용돼요 <span id="vote-timer"></span></div>
+      <div id="vote-list" class="card-list"></div>
+      <div class="muted center">다른 카드를 누르면 투표를 바꿀 수 있어요</div>
+    </section>
+
+    <!-- 암시장 -->
+    <section id="market" class="screen dim hidden">
+      <div class="panel market-panel">
+        <div class="market-head">
+          <h2>암시장</h2>
+          <div id="market-gold" class="gold"></div>
+        </div>
+        <p class="muted">"싸게 해줄게... 아마도." 등급을 골라 카드 상자를 여세요. (상자 1개 = 카드 1장)</p>
+        <div id="market-boxes" class="market-boxes"></div>
+        <div id="market-result" class="market-result"></div>
+        <button id="btn-market-close" class="btn">닫기 (E)</button>
+      </div>
+    </section>
+
+    <!-- 결과 -->
+    <section id="result" class="screen dim hidden">
+      <div class="panel result-panel">
+        <h2 id="result-title"></h2>
+        <div id="result-info" class="result-info"></div>
+        <div id="result-rows" class="result-rows"></div>
+        <div id="result-awards" class="result-awards"></div>
+        <div id="race-result" class="side-board hidden"></div>
+        <div class="result-btns">
+          <button id="btn-retry" class="btn primary">재도전</button>
+          <button id="btn-lobby" class="btn">나가기 (로비로)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 도박꾼 -->
+    <section id="gamble" class="screen dim hidden">
+      <div class="panel market-panel gamble-panel">
+        <div class="market-head">
+          <h2>도박꾼</h2>
+          <div id="gamble-gold" class="gold"></div>
+        </div>
+        <p class="muted">"한 판 하고 가. 인생은 한 방이야." 각자 자기 돈으로 겁니다.</p>
+        <div class="bet-row">
+          <span>걸 돈</span>
+          <button class="btn tiny" data-bet="-50">-50</button>
+          <button class="btn tiny" data-bet="-10">-10</button>
+          <span id="bet-amount" class="gold">10원</span>
+          <button class="btn tiny" data-bet="10">+10</button>
+          <button class="btn tiny" data-bet="50">+50</button>
+          <button class="btn tiny" data-bet="all">올인</button>
+        </div>
+        <div class="gamble-games">
+          <div class="gg">
+            <b>홀짝</b><span class="muted">맞히면 2배, 틀리면 전부 잃음</span>
+            <div class="row"><button id="g-odd" class="btn small">홀</button><button id="g-even" class="btn small">짝</button></div>
+          </div>
+          <div class="gg">
+            <b>룰렛</b><span class="muted">1 꽝 · 2~4 본전 · 5 두 배 · 6 다섯 배</span>
+            <button id="g-roulette" class="btn small">돌리기</button>
+          </div>
+          <div class="gg">
+            <b>카드 도박 (50원)</b><span class="muted">전설 / 저주 / 꽝 중 하나</span>
+            <div class="row"><button class="btn small g-card">▣</button><button class="btn small g-card">▣</button><button class="btn small g-card">▣</button></div>
+          </div>
+        </div>
+        <div id="gamble-result" class="gamble-result"></div>
+        <button id="btn-gamble-close" class="btn">닫기</button>
+      </div>
+    </section>
+
+    <!-- 시련의 방 투표 -->
+    <section id="trial" class="screen dim hidden">
+      <div class="panel trial-panel">
+        <h2>시련의 방이 열렸다!</h2>
+        <p>30초 동안 몰려오는 적을 버티면 <span class="gold">돈 + 희귀 이상 카드</span>. 실패해도 원정은 계속돼요.</p>
+        <div class="row">
+          <button id="trial-yes" class="btn primary">도전한다</button>
+          <button id="trial-no" class="btn">지나간다</button>
+        </div>
+        <div id="trial-status" class="muted center"></div>
+      </div>
+    </section>
+
+    <!-- 모드 선택 (배너를 좌우로 넘겨 고르기) -->
+    <section id="modesel" class="modesel-screen hidden">
+      <div class="modesel">
+        <div class="ms-title">모드 선택 <span class="muted">← → · 마우스 휠 · 배너 클릭으로 넘기기</span></div>
+        <div class="ms-stage">
+          <button id="ms-prev" class="btn ms-arrow">◀</button>
+          <div id="ms-track" class="ms-track"></div>
+          <button id="ms-next" class="btn ms-arrow">▶</button>
+        </div>
+        <div id="ms-dots" class="ms-dots"></div>
+        <div id="ms-info" class="ms-info"></div>
+        <div class="ms-dlabel muted">난이도</div>
+        <div id="ms-diff" class="diff-row ms-diff"></div>
+        <div class="ms-foot">
+          <button id="ms-ok" class="btn primary">이 모드로 결정 (Enter)</button>
+          <button id="ms-close" class="btn">닫기 (Esc)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 메뉴 -->
+    <section id="menu" class="screen dim hidden">
+      <div class="panel menu-panel">
+        <div class="menu-head">
+          <div class="menu-headl">
+            <button id="menu-back" class="btn tiny hidden">◀ 메뉴</button>
+            <span id="menu-title" class="menu-title">메뉴</span>
+          </div>
+          <button id="menu-close" class="btn tiny">닫기 (Tab)</button>
+        </div>
+        <div id="menu-body" class="menu-body"></div>
+      </div>
+    </section>
+
+    <div id="cmd-badge" class="cmd-badge hidden">커맨드 사용 중 · 기록 안 됨</div>
+    <div id="toast" class="toast hidden"></div>
+    <div id="event-title" class="event-title hidden"></div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

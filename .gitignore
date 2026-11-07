@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# 기록·저장·커맨드 해시는 올리지 않음
+data/
+.claude/
+*.log
+.env

@@ -1,0 +1,16 @@
+# Render 배포 설정 (Blueprint): 게임 화면 + 실시간 서버를 한 곳에서
+services:
+  - type: web
+    name: yangbaechu-yongsadan
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # 커맨드 패널 비밀번호 해시 (data/admin.hash 안의 값을 Render 화면에서 직접 붙여넣기)
+      - key: ADMIN_HASH
+        sync: false

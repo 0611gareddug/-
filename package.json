@@ -1,0 +1,29 @@
+{
+  "name": "yangbaechu-yongsadan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c yellow,cyan \"tsx watch server/index.ts --dev\" \"vite --port 5173 --strictPort\"",
+    "build": "vite build",
+    "start": "tsx server/index.ts",
+    "dev:test": "tsx scripts/dev-test.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx scripts/logic-test.ts",
+    "sim": "tsx scripts/sim.ts"
+  },
+  "dependencies": {
+    "galmuri": "^2.40.3",
+    "phaser": "3.80.1",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.7.5",
+    "@types/ws": "8.5.12",
+    "concurrently": "9.0.1",
+    "tsx": "4.19.1",
+    "typescript": "5.6.3",
+    "vite": "5.4.10"
+  }
+}
