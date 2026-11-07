@@ -272,6 +272,10 @@ class Room {
       () => this.stopGame(),
       {
         mode: { ...this.mode },
+        rawSend: (id: number, data: string) => {
+          const m = this.members.get(id);
+          if (m && !m.out && m.ws.readyState === WebSocket.OPEN) m.ws.send(data);
+        },
         save,
         saveId: this.saveId ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
         hostName: this.host?.name ?? "",
@@ -290,7 +294,7 @@ class Room {
         (msg) => this.send(m, msg),
         (_id, msg) => this.send(m, msg),
         () => { this.raceDone.add(m.id); this.sendRace(); this.checkRaceOver(); },
-        { mode: { ...this.mode }, saveId: `race-${m.id}`, hostName: m.name },
+        { mode: { ...this.mode }, saveId: `race-${m.id}`, hostName: m.name, rawSend: (_id: number, data: string) => { if (m.ws.readyState === WebSocket.OPEN) m.ws.send(data); } },
       );
       this.race.set(m.id, g);
     }
@@ -452,6 +456,9 @@ wss.on("connection", (ws) => {
       case "pick":
         game?.handlePick(me.id, Number(msg.idx));
         break;
+      case "relic":
+        game?.handleRelic(me.id, Number(msg.idx));
+        break;
       case "talent":
         game?.handleTalent(me.id, Number(msg.branch));
         break;
@@ -465,7 +472,9 @@ wss.on("connection", (ws) => {
         game?.handleRestReady(me.id, !!msg.ready);
         break;
       case "chest":
+        // 같은 키(E): 보물방이면 상자, 제단방이면 제단
         game?.handleChest(me.id);
+        game?.handleAltar(me.id);
         break;
       case "gamble":
         game?.handleGamble(me.id, msg.game, Number(msg.bet), msg.pick === "even" ? "even" : "odd");

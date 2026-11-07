@@ -2,7 +2,9 @@ export type SpriteBase = "slime" | "skeleton" | "beast" | "flyer" | "golem";
 /** chaser 추격 · shooter 거리 유지 사격 · charger 예고 후 돌진 · caster 예고 장판 · turret 고정 사격 */
 export type MonsterAI = "chaser" | "shooter" | "charger" | "caster" | "turret"
   // v1.0 새 패턴: 자폭 · 정면 방패 · 소환 · 탄막
-  | "bomber" | "shield" | "summoner" | "barrage";
+  | "bomber" | "shield" | "summoner" | "barrage"
+  // v1.5 황금 러시: 도망다니는 황금 슬라임
+  | "flee";
 export type StatusEffect = "slow" | "poison" | "burn";
 export type BossAbility = "slam" | "summon" | "ring" | "charge" | "strikes" | "teleport"
   // v1.0 모든 보스 공통: 지진 파동 · 연속 사격 · (광폭화 후) 나선 탄막
@@ -94,6 +96,8 @@ export const MONSTERS: Record<string, MonsterDef> = Object.fromEntries([
   m({ id: "lava_golem", name: "용암 골렘", base: "golem", pal: { a: "#e06020", A: "#802010", l: "#ffc060", e: "#fff060" }, ai: "chaser", r: 8, hp: 95, speed: 26, dmg: 16, gold: 8, xp: 10, onHit: "burn" }),
   m({ id: "wraith_knight", name: "망령 기사", base: "golem", pal: { a: "#7080a0", A: "#303850", l: "#c0d0f0", e: "#40e0f0" }, ai: "charger", r: 7, hp: 70, speed: 38, dmg: 14, gold: 7, xp: 9, phase: true, alpha: 0.8 }),
   m({ id: "archangel", name: "대천사", base: "flyer", pal: { a: "#fff0c0", A: "#e0b040", l: "#ffffff", e: "#f05a8a" }, ai: "shooter", r: 6, hp: 40, speed: 44, dmg: 10, gold: 7, xp: 9, proj: { kind: "light", speed: 150, count: 5, spread: 0.18, cd: 2.4 } }),
+  // v1.5 황금 러시 이벤트 방
+  m({ id: "gold_slime", name: "황금 슬라임", base: "slime", pal: { a: "#f8d040", A: "#b08018", l: "#fff8c0", e: "#141218" }, ai: "flee", r: 6, hp: 26, speed: 52, dmg: 0, gold: 14, xp: 6 }),
   // v1.0 특수 몬스터 (모든 월드에 섞여 나옴)
   m({ id: "bomb_shroom", name: "폭탄 버섯", base: "slime", pal: { a: "#e8603a", A: "#a03020", l: "#ffd0a0", e: "#141218" }, ai: "bomber", r: 6, hp: 20, speed: 58, dmg: 10, gold: 4, xp: 6 }),
   m({ id: "shield_knight", name: "방패병", base: "golem", pal: { a: "#8a90a8", A: "#4a5068", l: "#d8dce8", e: "#40e0f0" }, ai: "shield", r: 7, hp: 55, speed: 30, dmg: 10, gold: 6, xp: 8 }),

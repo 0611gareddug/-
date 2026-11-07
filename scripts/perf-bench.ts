@@ -15,20 +15,22 @@ let bytes = 0;
 let sends = 0;
 let maxBytes = 0;
 let zbytes = 0;
+const samples: string[] = [];
 const g = new Game(
   Array.from({ length: N }, (_, i) => ({ id: i + 1, name: `P${i}`, color: i, cls: CLASS_IDS[i % CLASS_IDS.length] })),
-  (m) => {
-    if (m.t !== "snap") return;
-    // 실제 서버처럼 방 인원수만큼 보낸다고 치고 한 번만 직렬화
-    const s = JSON.stringify(m);
-    bytes += Buffer.byteLength(s);
-    // 실제 서버처럼 perMessageDeflate(level 1)로 압축했을 때
-    if (sends % 10 === 0) zbytes += zlib.deflateRawSync(s, { level: 1 }).length * 10;
-    maxBytes = Math.max(maxBytes, s.length);
-    sends++;
+  () => {},
+  () => {},
+  () => {},
+  {
+    mode: { speedrun: false, diff: 2 }, saveId: "perf", hostName: "P0",
+    // 실제 서버처럼 사람마다 문자열을 바로 보냄 (v1.5 빠른 길)
+    rawSend: (_id, s) => {
+      bytes += Buffer.byteLength(s);
+      maxBytes = Math.max(maxBytes, s.length);
+      if (sends % 10 === 0) samples.push(s);
+      sends++;
+    },
   },
-  () => {}, () => {},
-  { mode: { speedrun: false, diff: 2 }, saveId: "perf", hostName: "P0" },
 );
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const G = g as any;
@@ -52,6 +54,7 @@ for (; t < TICKS; t++) {
   g.step();
   times.push(performance.now() - a);
 }
+for (const smp of samples) zbytes += zlib.deflateRawSync(smp, { level: 1 }).length * 10;
 times.sort((x, y) => x - y);
 const avg = times.reduce((x, y) => x + y, 0) / times.length;
 const p99 = times[Math.floor(times.length * 0.99)];

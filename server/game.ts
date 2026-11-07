@@ -9,7 +9,7 @@ import {
 } from "../shared/cards";
 import { isWallAt, moveCircle, tileAt } from "../shared/collide";
 import type {
-  Award, CmdAction, DescentMod, MonWire, ProjWire, SnapMonster, EliteAbility, PanicMission, Fx, GachaTier, GambleGame, InputState, ResultRow, RoomMode, ServerMsg, SnapZone,
+  Award, CmdAction, DescentMod, MonWire, ProjWire, SnapMonster, SnapPlayer, SnapshotWire, EliteAbility, PanicMission, Fx, GachaTier, GambleGame, InputState, ResultRow, RoomMode, ServerMsg, SnapZone,
   StageInfo, StageKind, ZoneKind,
 } from "../shared/protocol";
 import {
@@ -47,6 +47,12 @@ export interface Player extends Participant {
   droneT?: number;
   /** 닌자 천벌 돌진 (무적 + 보스 빼고 즉사) */
   lethalDash?: boolean;
+  /** v1.5 유물: 고를 선택지 · 불사조 사용함 · 번개/방패 타이머 · 제단 바침 */
+  relicOpts?: string[] | null;
+  phoenixUsed?: boolean;
+  relicZapT?: number;
+  relicShieldT?: number;
+  altarDone?: boolean;
   /** v1.4 카드: 회전 칼날이 마지막으로 때린 시각 / 유성 소환 타이머 */
   orbitHit?: Map<number, number>;
   meteorT?: number;
@@ -274,6 +280,8 @@ export interface DmgOpts {
 
 export interface GameOptions {
   mode: RoomMode;
+  /** v1.5 스냅샷을 문자열로 바로 보내는 함수 (빠른 길) */
+  rawSend?: (id: number, data: string) => void;
   save?: SaveData;
   saveId: string;
   hostName: string;
@@ -300,7 +308,7 @@ export function skillCd(base: number, s: Stats, slot = -1) {
 }
 
 /** v1.4 보스 등장 컷씬 길이 (초) */
-const BOSS_INTRO = 3.2;
+const BOSS_INTRO = 4.2;
 /** v1.0: 특성 트리가 있는 모드의 기본 피해 너프 (평타 -10%, 스킬 합계 -15%) */
 const BASIC_NERF = 0.9;
 const SKILL_NERF = 0.85;
@@ -365,6 +373,14 @@ export class Game {
   private gemMode = false;
   /** 무한 하강 */
   private descent = false;
+  /** v1.5 이미 만든 JSON 문자열을 그대로 보내는 길 (서버가 연결해 줌, 없으면 sendTo 사용) */
+  rawSend?: (id: number, data: string) => void;
+  /** 몬스터 밀어내기는 2틱에 한 번 (대신 두 배로 밀어냄) */
+  private sepTick = 0;
+  /** v1.5 이벤트 방 (황금 러시 · 저주받은 제단) */
+  private eventT = 0;
+  private eventWaveT = 0;
+  private altar: { x: number; y: number } | null = null;
   /** v1.4 보스 등장 컷씬 남은 시간 (이동·전투 멈춤) */
   private introT = 0;
   /** v1.0 특성 트리 사용 여부 */
@@ -405,6 +421,7 @@ export class Game {
     opts: GameOptions = { mode: { speedrun: false, diff: 1 }, saveId: "test", hostName: "" },
   ) {
     this.mode = opts.mode;
+    this.rawSend = opts.rawSend;
     this.saveId = opts.saveId;
     this.hostName = opts.hostName;
     for (const p of participants) {
@@ -811,6 +828,7 @@ export class Game {
   }
 
   private leaveRest() {
+    for (const p of this.players.values()) if (p.relicOpts) this.handleRelic(p.id, 0);
     if (this.worldCleared) {
       this.worldCleared = false;
       this.world++;
@@ -860,6 +878,21 @@ export class Game {
       }
       this.treasureT = TREASURE_TIME;
       this.portalOpen = true;
+    } else if (kind === "altar") {
+      // v1.5 저주받은 제단: 작은 방 가운데 제단, 출구는 처음부터 열림
+      const tm = generateTreasureMap();
+      this.map = tm;
+      mapName = "저주받은 제단";
+      this.altar = { x: (tm.w / 2) * 16, y: (tm.h / 2) * 16 - 8 };
+      for (const p of this.players.values()) p.altarDone = false;
+      this.eventT = 30;
+      this.portalOpen = true;
+    } else if (kind === "goldrush") {
+      // v1.5 황금 러시: 25초 동안 황금 슬라임 떼
+      this.map = generateMap(false, wd.special);
+      mapName = "황금 러시";
+      this.eventT = 25;
+      this.eventWaveT = 0;
     } else if (kind === "trial") {
       this.map = generateMap(true);
       mapName = "시련의 방";
@@ -946,6 +979,7 @@ export class Game {
       w: this.map.w, h: this.map.h, tiles: this.map.tiles, market: this.market ?? undefined,
       stall: kind === "rest" ? stall : undefined,
       chests: kind === "treasure" ? this.chests : undefined,
+      altar: kind === "altar" && this.altar ? this.altar : undefined,
       floor: this.descent ? this.floor : undefined,
       zone: this.panic ? this.zone : undefined,
       mission: this.panic ? this.mission : undefined,
@@ -955,8 +989,8 @@ export class Game {
     this.sentCards.clear();
     this.sentCos.clear();
     this.sentCdm.clear();
-    this.sentMon.clear();
-    this.sentProj.clear();
+    this.sentMonBy.clear();
+    this.sentProjBy.clear();
     this.broadcast({ t: "stage", stage: info });
     if (kind === "rest") this.sendRestStatus();
   }
@@ -1137,6 +1171,7 @@ export class Game {
     }
     this.worldCleared = true;
     this.startStage("rest", "market");
+    this.offerRelics();
   }
 
   private usable(p: Player, rarities: Rarity[]) {
@@ -1422,54 +1457,69 @@ export class Game {
   }
 
   /** v1.2 몬스터 압축: 변하지 않는 정보(종류·최대 체력·엘리트)는 처음 · 2초마다만 */
-  private monsterWire(full: boolean): MonWire[] {
+  /** v1.5 화면 범위: 카메라(480×270) 반쪽 + 여유 (보간·등장 대비) */
+  private static readonly VIEW_X = 240 + 90;
+  private static readonly VIEW_Y = 135 + 80;
+  private inView(cx: number, cy: number, x: number, y: number, pad = 0) {
+    return Math.abs(x - cx) < Game.VIEW_X + pad && Math.abs(y - cy) < Game.VIEW_Y + pad;
+  }
+
+  /** 몬스터 한 마리의 전송 모양 (안 바뀌는 정보 없이) — 틱마다 한 번만 만들고 모두가 같이 씀 */
+  private monsterBase(m: Monster): { t: MonWire; ex: Partial<SnapMonster> | null } {
+    let st = "";
+    if (m.stunT > 0) st += "s";
+    if (m.frozenT > 0) st += "z";
+    if (m.rootT > 0) st += "r";
+    if (m.slowT > 0) st += "w";
+    if (m.poisonT > 0) st += "p";
+    if ((m.curseT ?? 0) > 0) st += "c";
+    let ex: Partial<SnapMonster> | null = null;
+    const put = () => (ex ??= {});
+    if (m.flashT > 0) put().f = true;
+    if (m.spawnT > 0) put().sp = Math.round(m.spawnT * 10) / 10;
+    if (st) put().st = st;
+    if (m.windT > 0) put().ca = Math.round(m.rushA * 100) / 100;
+    if (m.kind === "dummy") {
+      put().dps = Math.round(m.log.reduce((a, e) => a + e.d, 0) / 5);
+      put().tot = Math.round(m.total);
+    }
+    return { t: [m.id, Math.round(m.x), Math.round(m.y), Math.ceil(m.hp)], ex };
+  }
+
+  /** v1.2 압축 + v1.5 보는 범위만: 종류·최대 체력·엘리트는 그 사람이 처음 볼 때 · 2초마다만 */
+  private monsterWire(full: boolean, list: { m: Monster; t: MonWire; ex: Partial<SnapMonster> | null }[], cx: number, cy: number, pid: number): MonWire[] {
     const out: MonWire[] = [];
+    const prev = this.sentMonBy.get(pid);
     const seen = new Map<number, number>();
-    for (const m of this.monsters) {
-      if (m.kind === "pvp") continue;
-      let st = "";
-      if (m.stunT > 0) st += "s";
-      if (m.frozenT > 0) st += "z";
-      if (m.rootT > 0) st += "r";
-      if (m.slowT > 0) st += "w";
-      if (m.poisonT > 0) st += "p";
-      if ((m.curseT ?? 0) > 0) st += "c";
-      const ex: Partial<SnapMonster> = {};
-      let any = false;
-      if (full || this.sentMon.get(m.id) !== m.mhp) {
-        ex.k = m.kind; ex.mhp = m.mhp;
-        if (m.elite) ex.el = m.elite;
-        any = true;
+    for (const { m, t, ex } of list) {
+      // 보스는 체력바 때문에 항상 보냄
+      if (!m.def.boss && !this.inView(cx, cy, m.x, m.y, m.r)) continue;
+      let e = ex;
+      if (full || prev?.get(m.id) !== m.mhp) {
+        e = { ...(ex ?? {}), k: m.kind, mhp: m.mhp };
+        if (m.elite) e.el = m.elite;
       }
-      if (m.flashT > 0) { ex.f = true; any = true; }
-      if (m.spawnT > 0) { ex.sp = Math.round(m.spawnT * 10) / 10; any = true; }
-      if (st) { ex.st = st; any = true; }
-      if (m.windT > 0) { ex.ca = Math.round(m.rushA * 100) / 100; any = true; }
-      if (m.kind === "dummy") {
-        ex.dps = Math.round(m.log.reduce((a, e) => a + e.d, 0) / 5);
-        ex.tot = Math.round(m.total);
-        any = true;
-      }
-      const hp = Math.ceil(m.hp);
-      out.push(any ? [m.id, Math.round(m.x), Math.round(m.y), hp, ex] : [m.id, Math.round(m.x), Math.round(m.y), hp]);
+      out.push(e ? [t[0], t[1], t[2], t[3], e] : t);
       seen.set(m.id, m.mhp);
     }
-    this.sentMon = seen;
+    this.sentMonBy.set(pid, seen);
     return out;
   }
 
-  /** v1.2 투사체 압축: 좌표는 정수, 종류는 처음 보일 때만 */
-  private projWire(full: boolean): ProjWire[] {
+  /** v1.2 투사체 압축 + v1.5 보는 범위만 */
+  private projWire(full: boolean, cx: number, cy: number, pid: number): ProjWire[] {
     const out: ProjWire[] = [];
+    const prev = this.sentProjBy.get(pid);
     const seen = new Set<number>();
     for (const pr of this.projs) {
+      if (!this.inView(cx, cy, pr.x, pr.y)) continue;
       const a = Math.round(Math.atan2(pr.vy, pr.vx) * 100);
-      out.push(full || !this.sentProj.has(pr.id)
+      out.push(full || !prev?.has(pr.id)
         ? [pr.id, Math.round(pr.x), Math.round(pr.y), a, pr.kind]
         : [pr.id, Math.round(pr.x), Math.round(pr.y), a]);
       seen.add(pr.id);
     }
-    this.sentProj = seen;
+    this.sentProjBy.set(pid, seen);
     return out;
   }
 
@@ -1478,6 +1528,79 @@ export class Game {
     if (!full && memo.get(id) === key) return false;
     memo.set(id, key);
     return true;
+  }
+
+  // ---------- v1.5 이벤트 방 ----------
+  private startGoldRush() {
+    this.title("황금 러시!", "25초 동안 도망다니는 황금 슬라임을 잡으면 돈이 쏟아져요", "#f8d040");
+    this.startStage("goldrush");
+  }
+
+  private startAltar() {
+    this.title("저주받은 제단", "제단 앞에서 E — 체력 30%를 바치면 전설 카드 1장 (한 번만)", "#c060f0");
+    this.startStage("altar");
+  }
+
+  /** 제단에 피를 바침: 체력 30% (최소 1 남음) → 전설 카드 */
+  handleAltar(id: number) {
+    const p = this.players.get(id);
+    if (!p || p.ghost || this.phase !== "play" || this.stageKind !== "altar" || !this.altar || p.altarDone) return;
+    if (Math.hypot(p.x - this.altar.x, p.y - this.altar.y) > 30) return;
+    p.altarDone = true;
+    p.hp = Math.max(1, p.hp - p.stats.maxHp * 0.3);
+    const card = this.randomCard(p, ["legend"]) ?? this.randomCard(p, ["rare"]);
+    this.fx.push({ k: "rage", x: Math.round(this.altar.x), y: Math.round(this.altar.y), r: 40 });
+    if (card) {
+      this.giveCard(p, card);
+      this.sendTo(p.id, { t: "altarResult", card });
+    }
+  }
+
+  private updateEventRoom(): boolean {
+    this.eventT -= DT;
+    if (this.stageKind === "goldrush" && this.eventT > 0) {
+      // 웨이브: 1.5초마다 황금 슬라임 (인원수만큼), 가끔 폭탄 버섯
+      this.eventWaveT -= DT;
+      if (this.eventWaveT <= 0) {
+        this.eventWaveT = 1.5;
+        const n = this.players.size;
+        for (let k = 0; k < 1 + n; k++) this.spawnMonster("gold_slime");
+        if (Math.random() < 0.35) this.spawnMonster("bomb_shroom");
+      }
+    }
+    const alive = [...this.players.values()].filter((p) => !p.ghost && !p.dc);
+    if (alive.length === 0) { this.finish(false); return true; }
+    const atExit = this.stageKind === "altar" && alive.every((p) => Math.hypot(p.x - this.map.portal.x, p.y - this.map.portal.y) < PORTAL_RANGE);
+    if (this.eventT <= 0 || atExit) {
+      this.altar = null;
+      for (const q of this.players.values()) if (q.ghost) { q.ghost = false; q.hp = Math.ceil(q.stats.maxHp * REVIVE_HP); }
+      this.openCards();
+      return true;
+    }
+    return false;
+  }
+
+  // ---------- v1.5 보스 유물 ----------
+  /** 보스를 잡고 휴게소에 들어가면 각자 유물 3개 중 1개 */
+  private offerRelics() {
+    for (const p of this.players.values()) {
+      const pool = CARDS.filter((c) => c.rarity === "relic" && !p.cards.includes(c.id));
+      const opts: string[] = [];
+      while (opts.length < 3 && pool.length) opts.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+      p.relicOpts = opts.length ? opts : null;
+      p.phoenixUsed = false;
+      if (p.relicOpts) this.sendTo(p.id, { t: "relics", options: p.relicOpts });
+    }
+  }
+
+  handleRelic(id: number, idx: number) {
+    const p = this.players.get(id);
+    if (!p || !p.relicOpts) return;
+    const card = p.relicOpts[Math.max(0, Math.min(p.relicOpts.length - 1, idx))];
+    p.relicOpts = null;
+    this.giveCard(p, card);
+    this.sendTo(p.id, { t: "relics", options: null });
+    this.sendTo(p.id, { t: "toast", msg: `유물 「${CARD_BY_ID[card].name}」 획득!` });
   }
 
   // ---------- 보물방 ----------
@@ -2023,7 +2146,7 @@ export class Game {
     if (!this.gemMode) this.updateRevives();
     for (const m of [...this.monsters]) this.updateMonster(m);
     this.guards = this.monsters.filter((m) => m.elite === "guard");
-    this.separateMonsters();
+    if (++this.sepTick % 2 === 0) this.separateMonsters();
     this.buildGrid();
     this.updateProjs();
     this.updateZones();
@@ -2034,6 +2157,8 @@ export class Game {
       if (this.updateTrial()) return;
     } else if (this.phase === "play" && this.stageKind === "treasure") {
       if (this.updateTreasure()) return;
+    } else if (this.phase === "play" && (this.stageKind === "goldrush" || this.stageKind === "altar")) {
+      if (this.updateEventRoom()) return;
     } else if (this.phase === "play" && this.panic) {
       this.updatePanic();
     } else if (this.phase === "play") {
@@ -2051,9 +2176,13 @@ export class Game {
         if (this.stageKind === "battle" && this.world === 1 && this.round === 1 && !this.descent) this.achAll("first_step");
         // 랜덤방: 시련의 방 15% / 보물방 15% (테스트용 FORCE_TRIAL=1, FORCE_TREASURE=1)
         const roll = Math.random();
+        // v1.5: 시련 12% · 보물 12% · 황금 러시 10% · 저주받은 제단 8%
+        const forced = process.env.FORCE_EVENT_ROOM;
         if (this.stageKind === "battle" && process.env.FORCE_TREASURE === "1") this.startTreasure();
-        else if (this.stageKind === "battle" && (process.env.FORCE_TRIAL === "1" || roll < 0.15)) this.openTrialVote();
-        else if (this.stageKind === "battle" && roll < 0.3) this.startTreasure();
+        else if (this.stageKind === "battle" && (process.env.FORCE_TRIAL === "1" || roll < 0.12)) this.openTrialVote();
+        else if (this.stageKind === "battle" && roll < 0.24) this.startTreasure();
+        else if (this.stageKind === "battle" && (forced === "goldrush" || (!forced && roll < 0.34))) this.startGoldRush();
+        else if (this.stageKind === "battle" && (forced === "altar" || (!forced && roll < 0.42))) this.startAltar();
         else this.openCards();
         return;
       }
@@ -2111,6 +2240,16 @@ export class Game {
   }
 
   private knockOut(p: Player) {
+    if (p.stats.phoenix && !p.phoenixUsed) {
+      // 유물 '불사조 깃털': 한 번 바로 일어남
+      p.phoenixUsed = true;
+      p.hp = Math.ceil(p.stats.maxHp * 0.5);
+      p.invulnT = 2;
+      this.fx.push({ k: "revive", x: Math.round(p.x), y: Math.round(p.y) });
+      this.fx.push({ k: "rage", x: Math.round(p.x), y: Math.round(p.y), r: 50 });
+      this.sendTo(p.id, { t: "toast", msg: "불사조 깃털이 타올랐어요!" });
+      return;
+    }
     p.hp = 0;
     p.ghost = true;
     p.deaths++;
@@ -2732,6 +2871,15 @@ export class Game {
             this.moveMonster(m, ux * spd * 0.8 * DT, uy * spd * 0.8 * DT);
           }
           break;
+        case "flee": {
+          // 황금 슬라임: 가까운 용사에게서 도망 (벽에 막히면 옆으로)
+          if (dist < 140 && canMove) {
+            const side = m.strafe * 0.6;
+            this.moveMonster(m, (-ux - uy * side) * spd * DT, (-uy + ux * side) * spd * DT);
+            if (Math.random() < 0.02) m.strafe *= -1;
+          }
+          break;
+        }
         case "bomber":
           // 자폭: 가까이 오면 심지(0.8초, 깜빡임) 후 폭발
           if (m.fuseT !== undefined) {
@@ -2998,6 +3146,29 @@ export class Game {
 
   /** v1.4 카드 효과: 회전 칼날 · 유성 소환 */
   private updateCardFx(p: Player) {
+    if (p.stats.relicZap) {
+      p.relicZapT = (p.relicZapT ?? 2.5) - DT;
+      if (p.relicZapT <= 0) {
+        p.relicZapT = 2.5;
+        const near = this.nearMonsters(p.x, p.y, 120, this.nearBuf)
+          .filter((m) => m.spawnT <= 0 && m.kind !== "chest" && m.kind !== "pvp" && m.kind !== "dummy" && m.hp > 0)
+          .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
+          .slice(0, 3);
+        if (near.length) {
+          this.fx.push({ k: "zap", x: Math.round(p.x), y: Math.round(p.y), pts: near.flatMap((m) => [Math.round(m.x), Math.round(m.y)]) });
+          for (const m of near) this.dealDamage(m, 14, p, { skill: true, noCrit: true });
+        }
+      }
+    }
+    if (p.stats.relicShield) {
+      p.relicShieldT = (p.relicShieldT ?? 8) - DT;
+      if (p.relicShieldT <= 0) {
+        p.relicShieldT = 8;
+        p.shield = Math.max(p.shield, 30);
+        p.shieldT = Math.max(p.shieldT, 8);
+        this.fx.push({ k: "shield", x: Math.round(p.x), y: Math.round(p.y) });
+      }
+    }
     if (p.stats.orbit > 0) {
       const n = p.stats.orbit;
       p.orbitHit ??= new Map();
@@ -3470,6 +3641,7 @@ export class Game {
 
   private killMonster(m: Monster, killer: Player) {
     this.monsters = this.monsters.filter((o) => o !== m);
+    if (killer.stats.killHeal && !killer.ghost) killer.hp = Math.min(killer.stats.maxHp, killer.hp + killer.stats.maxHp * killer.stats.killHeal);
     if (killer.stats.killZap) {
       // 카드 '처치 번개': 주변 3명에게 번개
       const near = this.monsters
@@ -3640,8 +3812,8 @@ export class Game {
   /** 이번 틱의 '보호막' 엘리트 (없으면 피해 계산 때 전체 검색을 안 함) */
   private guards: Monster[] = [];
   /** 지난 스냅샷에 보낸 몬스터(id → mhp) · 투사체 id */
-  private sentMon = new Map<number, number>();
-  private sentProj = new Set<number>();
+  private sentMonBy = new Map<number, Map<number, number>>();
+  private sentProjBy = new Map<number, Set<number>>();
 
   private sendSnapshot(force = false) {
     // 매 틱이 아니라 2틱에 한 번만 보냄 (네트워크 절반). 이펙트는 그동안 모였다가 같이 감
@@ -3651,7 +3823,8 @@ export class Game {
     const zones: SnapZone[] = this.zones.map((z) => ({
       id: z.id, k: z.kind, x: round1(z.x), y: round1(z.y), r: Math.round(z.r), t: Math.min(1, z.elapsed / z.dur),
     }));
-    this.broadcast({
+    // v1.5: 공통 부분은 한 번만 만들고, 몬스터·투사체·장판·이펙트는 사람마다 화면 근처만
+    const common: Omit<SnapshotWire, "mz" | "pz" | "zones" | "fx"> = {
       t: "snap",
       time: this.time,
       players: [...this.players.values()].map((p) => {
@@ -3679,15 +3852,13 @@ export class Game {
           cards: this.changed(this.sentCards, p.id, p.cards.join(","), full) ? p.cards : undefined,
         };
       }),
-      mz: this.monsterWire(full),
-      pz: this.projWire(full),
+
       pets: this.pets.map((pt) => ({
         id: pt.id, owner: pt.ownerId, x: round1(pt.x), y: round1(pt.y),
         k: pt.kind,
         a: Math.round(pt.aim * 100) / 100,
       })),
-      zones,
-      fx: this.fx,
+
       portal: this.portalOpen ? this.map.portal : null,
       remaining: this.monsters.filter((m) => m.kind !== "chest" && m.kind !== "dummy" && m.kind !== "pvp").length,
       gem: this.gemMode && this.stageKind === "arena" ? { x: round1(this.gem.x), y: round1(this.gem.y), holder: this.gem.holder } : undefined,
@@ -3696,6 +3867,7 @@ export class Game {
       storm: this.stormLevel() || undefined,
       trialT: this.stageKind === "trial" && this.phase === "play" ? Math.max(0, Math.ceil(this.trialT)) : undefined,
       treasureT: this.stageKind === "treasure" && this.phase === "play" ? Math.max(0, Math.ceil(this.treasureT)) : undefined,
+      eventT: (this.stageKind === "goldrush" || this.stageKind === "altar") && this.phase === "play" ? Math.max(0, Math.ceil(this.eventT)) : undefined,
       panic: this.panic ? {
         z: this.zone, m: this.mission, t: Math.max(0, Math.round(this.panicT * 10) / 10),
         got: this.mission === "collect" ? this.keyGot : this.mission === "exit" ? this.atExit() : this.panicKilled(),
@@ -3704,7 +3876,76 @@ export class Game {
         done: this.phase === "complete" || undefined,
       } : undefined,
       cmd: this.cmdUsed || undefined,
+    };
+    const mlist = this.monsters.filter((m) => m.kind !== "pvp").map((m) => ({ m, ...this.monsterBase(m) }));
+    // 다른 사람에겐 필요 없는 내 정보(쿨타임·경험치·돈·속도)는 본인에게만
+    const lite = common.players.map((q) => {
+      const { cds: _a, cdm: _b, xp: _c, xpn: _d, gold: _e, spd: _f, rev: _g, ...rest } = q;
+      return rest as SnapPlayer;
     });
+    if (this.rawSend) {
+      // v1.5 빠른 길: 공통 부분은 문자열로 한 번만 만들고, 사람마다 다른 부분만 붙임
+      const { players: _p, ...head } = common;
+      const headStr = JSON.stringify(head).slice(0, -1);
+      const fullStr = common.players.map((q) => JSON.stringify(q));
+      const liteStr = lite.map((q) => JSON.stringify(q));
+      // 조각 문자열을 한 번만 만들어 두고, 사람마다 보이는 것만 이어 붙임
+      const mons = mlist.map(({ m, t, ex }) => {
+        const fullEx: Partial<SnapMonster> = { ...(ex ?? {}), k: m.kind, mhp: m.mhp };
+        if (m.elite) fullEx.el = m.elite;
+        return {
+          m,
+          short: JSON.stringify(ex ? [t[0], t[1], t[2], t[3], ex] : t),
+          long: JSON.stringify([t[0], t[1], t[2], t[3], fullEx]),
+        };
+      });
+      const projs = this.projs.map((pr) => {
+        const head = `[${pr.id},${Math.round(pr.x)},${Math.round(pr.y)},${Math.round(Math.atan2(pr.vy, pr.vx) * 100)}`;
+        return { pr, short: `${head}]`, long: `${head},"${pr.kind}"]` };
+      });
+      const zstr = zones.map((z) => ({ z, s: JSON.stringify(z) }));
+      const fstr = this.fx.map((f) => ({ f, s: JSON.stringify(f) }));
+      for (const p of this.players.values()) {
+        if (p.dc) continue;
+        const cx = p.x, cy = p.y;
+        const ps = common.players.map((q, i) => (q.id === p.id ? fullStr[i] : liteStr[i])).join(",");
+        const prevM = this.sentMonBy.get(p.id);
+        const seenM = new Map<number, number>();
+        const mz: string[] = [];
+        for (const o of mons) {
+          if (!o.m.def.boss && !this.inView(cx, cy, o.m.x, o.m.y, o.m.r)) continue;
+          mz.push(full || prevM?.get(o.m.id) !== o.m.mhp ? o.long : o.short);
+          seenM.set(o.m.id, o.m.mhp);
+        }
+        this.sentMonBy.set(p.id, seenM);
+        const prevP = this.sentProjBy.get(p.id);
+        const seenP = new Set<number>();
+        const pz: string[] = [];
+        for (const o of projs) {
+          if (!this.inView(cx, cy, o.pr.x, o.pr.y)) continue;
+          pz.push(full || !prevP?.has(o.pr.id) ? o.long : o.short);
+          seenP.add(o.pr.id);
+        }
+        this.sentProjBy.set(p.id, seenP);
+        const zs = zstr.filter((o) => this.inView(cx, cy, o.z.x, o.z.y, o.z.r)).map((o) => o.s).join(",");
+        const fx = fstr.filter((o) => this.inView(cx, cy, o.f.x, o.f.y, 60 + (o.f.r ?? 0))).map((o) => o.s).join(",");
+        this.rawSend(p.id, `${headStr},"players":[${ps}],"mz":[${mz.join(",")}],"pz":[${pz.join(",")}],"zones":[${zs}],"fx":[${fx}]}`);
+      }
+      this.fx = [];
+      return;
+    }
+    for (const p of this.players.values()) {
+      if (p.dc) continue;
+      const cx = p.x, cy = p.y;
+      this.sendTo(p.id, {
+        ...common,
+        players: common.players.map((q, i) => (q.id === p.id ? q : lite[i])),
+        mz: this.monsterWire(full, mlist, cx, cy, p.id),
+        pz: this.projWire(full, cx, cy, p.id),
+        zones: zones.filter((z) => this.inView(cx, cy, z.x, z.y, z.r)),
+        fx: this.fx.filter((f) => this.inView(cx, cy, f.x, f.y, 60 + (f.r ?? 0))),
+      });
+    }
     this.fx = [];
   }
 }

@@ -1,6 +1,6 @@
 import type { ClassId } from "./classes";
 
-export type Rarity = "common" | "rare" | "legend" | "curse" | "team";
+export type Rarity = "common" | "rare" | "legend" | "curse" | "team" | "relic";
 
 export interface Stats {
   atkMul: number;
@@ -85,6 +85,11 @@ export interface Stats {
   meteorRain: number;
   frostDash: number;
   killZap: number;
+  /** v1.5 보스 유물 */
+  phoenix: number;
+  killHeal: number;
+  relicZap: number;
+  relicShield: number;
 }
 
 export function baseStats(maxHp: number): Stats {
@@ -101,6 +106,7 @@ export function baseStats(maxHp: number): Stats {
     turretBonus: 0, napalm: 0, bigPot: 0, chef: 0, loud: 0, echo: 0, moody: 0,
     baseAtk: 10, baseSpeed: 70, baseAtkCd: 0.45, skillFlat: 0, skillCdFlat: 0, dmgFlatReduce: 0, goldFlat: 0, areaFlat: 0, shurikenPlus: 0, assassin: 0, curseExt: 0, curseBoost: 0, slotCd: [0, 0, 0, 0],
     orbit: 0, critBoom: 0, meteorRain: 0, frostDash: 0, killZap: 0,
+    phoenix: 0, killHeal: 0, relicZap: 0, relicShield: 0,
   };
 }
 
@@ -136,6 +142,7 @@ export const RARITY_NAME: Record<Rarity, string> = {
   legend: "전설",
   curse: "저주",
   team: "팀",
+  relic: "보스 유물",
 };
 
 type C = Omit<CardDef, "stack" | "quote"> & { stack?: boolean; quote?: string };
@@ -151,7 +158,7 @@ export const addSpeed = (s: Stats, n: number) => { s.speedMul += n / s.baseSpeed
 /** 초당 공격 횟수 +n */
 export const addAps = (s: Stats, n: number) => { s.atkSpdMul += n * s.baseAtkCd; };
 /** 대시 쿨타임 -n초 (기본 1.2초 기준) */
-const dashCd = (s: Stats, n: number) => { s.dashCdMul = Math.max(0.3, s.dashCdMul - n / 1.2); };
+export const dashCd = (s: Stats, n: number) => { s.dashCdMul = Math.max(0.3, s.dashCdMul - n / 1.2); };
 
 export const CARDS: CardDef[] = [
   // ---------- 스탯 강화 (12) ----------
@@ -224,6 +231,18 @@ export const CARDS: CardDef[] = [
   card({ id: "meteorrain", name: "유성 소환", rarity: "legend", desc: "4초마다 가까운 적에게 유성이 떨어짐 (피해 22)", quote: "하늘이 도와줌", apply: (s) => { s.meteorRain = 1; } }),
   card({ id: "frostdash", name: "서리 대시", rarity: "rare", desc: "대시하면 주변 적 2초 둔화 + 피해 8", quote: "시원하게 지나감", apply: (s) => { s.frostDash = 1; } }),
   card({ id: "killzap", name: "처치 번개", rarity: "legend", desc: "적을 처치하면 주변 적 3명에게 번개 (평타의 70%)", quote: "다음은 너다", apply: (s) => { s.killZap = 1; } }),
+
+  // ---------- v1.5 보스 유물 (보스를 잡으면 3개 중 1개, 카드 뽑기엔 안 나옴) ----------
+  card({ id: "r_phoenix", name: "불사조 깃털", rarity: "relic", desc: "쓰러지면 한 번, 체력 50%로 바로 일어남 (월드마다 다시 충전)", quote: "아직 안 끝났어", apply: (s) => { s.phoenix = 1; } }),
+  card({ id: "r_boots", name: "바람의 장화", rarity: "relic", desc: "대시 횟수 +1, 대시 쿨타임 -0.3초, 이동 속도 +6", quote: "발이 안 보여", apply: (s) => { s.dashCharges += 1; dashCd(s, 0.3); addSpeed(s, 6); } }),
+  card({ id: "r_fang", name: "흡혈귀의 송곳니", rarity: "relic", desc: "적을 처치할 때마다 최대 체력의 2% 회복", quote: "한 입만", apply: (s) => { s.killHeal += 0.02; } }),
+  card({ id: "r_giant", name: "거인의 심장", rarity: "relic", desc: "최대 체력 +90, 받는 피해 -2, 이동 속도 -5", quote: "쿵. 쿵. 쿵.", apply: (s) => { s.maxHp += 90; s.dmgFlatReduce += 2; addSpeed(s, -5); } }),
+  card({ id: "r_mask", name: "광전사의 가면", rarity: "relic", desc: "모든 피해 +25%, 받는 피해 +15%", quote: "이성은 두고 왔다", apply: (s) => { s.atkMul *= 1.25; s.dmgTakenMul *= 1.15; } }),
+  card({ id: "r_stone", name: "현자의 돌", rarity: "relic", desc: "모든 스킬 쿨타임 -20%", quote: "시간을 접었다", apply: (s) => { s.skillCdMul *= 0.8; } }),
+  card({ id: "r_crown", name: "황금 왕관", rarity: "relic", desc: "얻는 돈 +60%, 치명타 확률 +6%", quote: "무거운 머리", apply: (s) => { s.goldMul += 0.6; s.critChance += 0.06; } }),
+  card({ id: "r_bottle", name: "번개 병", rarity: "relic", desc: "2.5초마다 가까운 적 3명에게 번개 (피해 14)", quote: "뚜껑 열지 마시오", apply: (s) => { s.relicZap = 1; } }),
+  card({ id: "r_aegis", name: "수호의 방패", rarity: "relic", desc: "8초마다 보호막 30 (피해를 막아 줌)", quote: "든든하다", apply: (s) => { s.relicShield = 1; } }),
+  card({ id: "r_gem", name: "저주받은 보석", rarity: "relic", desc: "모든 피해 +40%, 최대 체력 -30%", quote: "아름답지만...", apply: (s) => { s.atkMul *= 1.4; s.maxHp = Math.round(s.maxHp * 0.7); } }),
 
   // ---------- 스킬 연동 (5) ----------
   card({ id: "skillmania", name: "스킬 마니아", rarity: "common", stack: true, desc: "스킬 피해 +3 (한 번 맞을 때마다)", quote: "평타는 촌스러워", apply: (s) => { s.skillFlat += 3; } }),

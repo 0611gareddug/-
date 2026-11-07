@@ -65,6 +65,8 @@ export type ClientMsg =
   | { t: "input"; input: InputState }
   | { t: "cast"; slot: number; x: number; y: number }
   | { t: "pick"; idx: number }
+  /** v1.5 보스 유물 고르기 */
+  | { t: "relic"; idx: number }
   /** 자유 채팅 */
   | { t: "chat"; text: string }
   /** 로비 축구 입력 */
@@ -266,6 +268,8 @@ export interface Snapshot {
   trialT?: number;
   /** 보물방 남은 시간 (초) */
   treasureT?: number;
+  /** v1.5 황금 러시 · 제단 남은 시간 (초) */
+  eventT?: number;
   /** 이 판에서 커맨드를 썼는지 */
   cmd?: boolean;
   /** PANIC 모드 상태 */
@@ -297,7 +301,7 @@ export interface PanicSnap {
   done?: boolean;
 }
 
-export type StageKind = "battle" | "boss" | "rest" | "arena" | "trial" | "treasure";
+export type StageKind = "battle" | "boss" | "rest" | "arena" | "trial" | "treasure" | "goldrush" | "altar";
 
 export interface StageInfo {
   kind: StageKind;
@@ -309,6 +313,8 @@ export interface StageInfo {
   tiles: string;
   /** 휴게소 가판대 위치 */
   market?: { x: number; y: number };
+  /** v1.5 저주받은 제단 위치 */
+  altar?: { x: number; y: number };
   /** 휴게소 가판대 종류 */
   stall?: "market" | "gambler";
   /** 무한 하강: 층 / 변형 규칙 */
@@ -474,6 +480,10 @@ export type ServerMsg =
   | { t: "pong"; c: number }
   /** v1.4 보스 등장 컷씬 (VS) */
   | { t: "bossIntro"; boss: string; world: number; time: number }
+  /** v1.5 보스 유물 3택1 (null 이면 창 닫기) */
+  | { t: "relics"; options: string[] | null }
+  /** v1.5 저주받은 제단: 바쳤는지 */
+  | { t: "altarResult"; card: string }
   /** 보물방 상자 결과 (나에게만) — gold: 얻은 돈, mimic이면 lost: 잃은 돈 */
   | { t: "chestResult"; idx: number; mimic: boolean; gold: number; lost: number; total: number }
   /** PANIC 구역 돌파 (COMPLETE! 연출) */

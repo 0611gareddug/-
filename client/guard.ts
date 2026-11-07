@@ -48,8 +48,12 @@ function sizeCheck() {
 function debuggerCheck() {
   const t = performance.now();
   (function () { /* 감지용 */ }).constructor("debugger")();
-  return performance.now() - t > 150;
+  return performance.now() - t > 300;
 }
+
+/** v1.5 잘못 걸림 방지: 한 번 렉으로 멈춘 건 무시하고, 연달아 2번 걸릴 때만 튕김 */
+let sizeStrikes = 0;
+let dbgStrikes = 0;
 
 export function initGuard(handler: () => void) {
   // 개발 중(vite dev)에는 끔
@@ -59,11 +63,16 @@ export function initGuard(handler: () => void) {
   window.addEventListener("contextmenu", (e) => e.preventDefault(), true);
   baseDpr = window.devicePixelRatio || 1;
   const run = () => {
-    if (sizeCheck()) trip();
+    sizeStrikes = sizeCheck() ? sizeStrikes + 1 : 0;
+    if (sizeStrikes >= 2) trip();
   };
   window.addEventListener("resize", run);
   setInterval(run, 700);
   // debugger 검사는 조금 느리게 (멈춤이 길면 열린 것)
-  setInterval(() => { if (debuggerCheck()) trip(); }, 1500);
+  setInterval(() => {
+    if (document.hidden) return;
+    dbgStrikes = debuggerCheck() ? dbgStrikes + 1 : 0;
+    if (dbgStrikes >= 2) trip();
+  }, 1500);
   run();
 }

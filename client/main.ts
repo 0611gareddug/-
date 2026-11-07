@@ -408,6 +408,7 @@ async function ensureGame(): Promise<GameScene> {
   scene.net = net;
   scene.myId = myId;
   scene.onSnapshot = updateHud;
+  scene.onAutoLite = () => toast("화면이 버벅여서 이펙트를 자동으로 줄였어요 (설정 → 성능 → 감자 모드로 더 가볍게)");
   game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: "game",
@@ -497,6 +498,7 @@ function updateHud(s: Snapshot) {
     else if (stage?.kind === "rest" && stage.market && nearMarket()) text = `${displayKey(settings.keys.market)} 를 눌러 ${stage.stall === "gambler" ? "도박꾼" : "암시장"} 열기`;
     else if (stage?.kind === "treasure" && chestBusted) text = "미믹에게 당했어요... 출구로 가세요";
     else if (stage?.kind === "treasure" && (scene?.nearChest(chestOpened) ?? Infinity) <= 26) text = `${displayKey(settings.keys.market)} 를 눌러 상자 열기 (미믹 조심!)`;
+    else if (stage?.kind === "altar" && (scene?.nearAltar() ?? Infinity) <= 30) text = `${displayKey(settings.keys.market)} 를 눌러 제단에 피를 바치기 (체력 30% → 전설 카드, 한 번만)`;
     else if (s.portal && stage?.kind !== "rest") text = "포탈이 열렸어요! 살아있는 모두가 포탈에 모이면 출발해요.";
     msg.textContent = text;
     msg.classList.toggle("hidden", !text);
@@ -538,7 +540,11 @@ function updateHud(s: Snapshot) {
 
   const stageEl = $("hud-stage");
   const label = stageEl.dataset.label ?? "";
-  const sub = stage?.kind === "treasure"
+  const sub = stage?.kind === "goldrush"
+    ? `<span class="gold">황금 슬라임을 잡아라! 남은 시간 ${s.eventT ?? 0}초</span>`
+    : stage?.kind === "altar"
+    ? `<span style="color:#c060f0">남은 시간 ${s.eventT ?? 0}초</span> <span class="muted">출구에 모두 모이면 출발</span>`
+    : stage?.kind === "treasure"
     ? `<span class="gold">상자 ${chestOpened.size}/4 · 남은 시간 ${s.treasureT ?? 0}초</span> <span class="muted">출구에 모두 모이면 출발</span>`
     : stage?.kind === "trial"
     ? `<span style="color:var(--danger)">버티세요! 남은 시간 ${s.trialT ?? 0}초</span>`
@@ -852,6 +858,7 @@ window.addEventListener("keydown", (e) => {
     if (visible("market") || visible("gamble")) closeMarket();
     else if (stage?.kind === "rest" && nearMarket() && !visible("cards") && !visible("vote")) openMarket();
     else if (stage?.kind === "treasure" && !chestBusted) net.send({ t: "chest" });
+    else if (stage?.kind === "altar") net.send({ t: "chest" });
   }
   if (e.key === "Escape" && (visible("market") || visible("gamble"))) closeMarket();
   if (isKey(e, "ready") && stage?.kind === "rest" && visible("hud")) setRestReady(!restReady);
@@ -1025,6 +1032,29 @@ function showResult(r: Extract<ServerMsg, { t: "result" }>) {
   show("result");
 }
 
+// ---------- v1.5 보스 유물 고르기 ----------
+function showRelics(options: string[] | null) {
+  const box = $("relic-pick");
+  if (!options) { box.classList.add("hidden"); refreshUiOpen(); return; }
+  const list = $("relic-list");
+  list.innerHTML = "";
+  options.forEach((id, i) => {
+    const el = cardEl(id, i + 1);
+    el.classList.add("deal");
+    el.style.animationDelay = `${i * 140}ms`;
+    el.onclick = () => {
+      [...list.children].forEach((c, j) => c.classList.toggle("picked", j === i));
+      const r = el.getBoundingClientRect();
+      if (!settings.potato) cardBurst(r.left + r.width / 2, r.top + r.height / 2, "#ff8040");
+      sfx.magic();
+      net.send({ t: "relic", idx: i });
+    };
+    list.append(el);
+  });
+  box.classList.remove("hidden");
+  sfx.fanfare();
+}
+
 // ---------- v1.4 보스 등장 컷씬 (VS) ----------
 let bossIntroTimer: number | undefined;
 function showBossIntro(boss: string, world: number, time: number) {
@@ -1037,20 +1067,32 @@ function showBossIntro(boss: string, world: number, time: number) {
   const heroes = lastSnap?.players.length
     ? lastSnap.players.map((p) => ({ cls: p.cls, c: p.c, n: p.n }))
     : (lobbyInfo?.players ?? []).map((p) => ({ cls: p.cls, c: p.color, n: p.name }));
-  for (const p of heroes) {
+  heroes.forEach((p, i) => {
     const row = document.createElement("div");
     row.className = "bi-hero";
+    row.style.setProperty("--i", String(i));
     row.append(heroCanvas(p.cls, p.c));
     const n = document.createElement("span");
     n.textContent = p.n;
     n.style.color = PLAYER_COLORS[p.c];
     row.append(n);
     party.append(row);
-  }
+  });
   const bossBox = $("bi-boss");
   bossBox.innerHTML = "";
   bossBox.append(paint(BODIES[def.base][0], monsterPalette(def.pal), 1));
-  $("bi-name").textContent = def.name;
+  // 이름은 한 글자씩 튀어나옴
+  const nameEl = $("bi-name");
+  nameEl.innerHTML = "";
+  [...def.name].forEach((ch, i) => {
+    const sp = document.createElement("span");
+    sp.className = "ch";
+    sp.style.setProperty("--i", String(i));
+    sp.textContent = ch === " " ? "\u00a0" : ch;
+    nameEl.append(sp);
+  });
+  // 앞부분은 게임 화면에서 카메라가 보스에게 다가감
+  scene?.startIntroCam(boss);
   $("bi-sub").textContent = `${WORLDS[world - 1]?.name ?? ""}의 주인`;
   box.classList.remove("hidden", "play");
   void box.offsetWidth;
@@ -1249,6 +1291,8 @@ function stageLabel(st: StageInfo) {
   }
   if (st.kind === "trial") return `${st.world}-${st.round} 시련의 방`;
   if (st.kind === "treasure") return `${st.world}-${st.round} 보물방`;
+  if (st.kind === "goldrush") return `${st.world}-${st.round} <span class="gold">황금 러시</span>`;
+  if (st.kind === "altar") return `${st.world}-${st.round} <span style="color:#c060f0">저주받은 제단</span>`;
   if (st.kind === "rest") return `휴게소 · ${st.stall === "gambler" ? "도박꾼" : "암시장"} <span class="muted">(월드 ${st.world})</span>`;
   if (st.kind === "boss") return `${st.world}-보스 ${st.name}`;
   return `${st.world}-${st.round} ${st.name} <span class="muted">(${st.round}/${ROUNDS_PER_WORLD})</span>`;
@@ -1315,12 +1359,13 @@ net.onMessage = async (m: ServerMsg) => {
       const st = m.stage;
       bgm.play(st.zone !== undefined && st.kind !== "rest" ? "panic"
         : st.kind === "rest" ? "rest"
-        : st.kind === "treasure" ? "treasure"
+        : st.kind === "treasure" || st.kind === "goldrush" || st.kind === "altar" ? "treasure"
         : st.kind === "boss" || st.kind === "trial" || st.kind === "arena" ? "boss"
         : `w${st.world}`);
       if (st.kind === "boss") sfx.bossRoar();
       chestOpened = new Set();
       chestBusted = false;
+      if (st.kind !== "rest") showRelics(null);
       show("hud");
       panicStage(m.stage);
       // 새 월드 진입 알림
@@ -1422,6 +1467,13 @@ net.onMessage = async (m: ServerMsg) => {
       break;
     case "bossIntro":
       showBossIntro(m.boss, m.world, m.time);
+      break;
+    case "relics":
+      showRelics(m.options);
+      break;
+    case "altarResult":
+      sfx.fanfare();
+      toast(`제단이 응답했다! 「${CARD_BY_ID[m.card]?.name ?? m.card}」 획득`);
       break;
     case "race":
       renderRace(m.entries, m.over);

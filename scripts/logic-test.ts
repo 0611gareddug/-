@@ -33,7 +33,7 @@ const B = g.players.get(2)!;
 
 // ---------- 카드 수 ----------
 check("검사 이름 변경 + 마법사 스킬 피해 감소", (await import("../shared/classes")).CLASSES.warrior.name === "검사" && (g as any).players.size > 0);
-check("카드 76장 (v1.4 현란한 카드 5장 포함)", CARDS.length === 76, `${CARDS.length}`);
+check("카드 86장 (현란한 카드 5장 + 보스 유물 10개 포함)", CARDS.length === 86, `${CARDS.length}`);
 check("팀카드 10장", CARDS.filter((c) => c.rarity === "team").length === 10);
 
 // ---------- 암시장 ----------
@@ -610,7 +610,7 @@ gdc.tick();
 const stay = gdc.players.get(1)!;
 stay.x = GDC.map.portal.x; stay.y = GDC.map.portal.y;
 gdc.tick();
-check("재접속: 포탈은 연결된 사람만 모이면 출발", GDC.phase === "cards" || GDC.phase === "trialvote" || GDC.stageKind === "treasure");
+check("재접속: 포탈은 연결된 사람만 모이면 출발", GDC.phase === "cards" || GDC.phase === "trialvote" || GDC.stageKind === "treasure" || GDC.stageKind === "goldrush" || GDC.stageKind === "altar");
 gdc.setDisconnected(2, false);
 check("재접속: 돌아오면 다시 정상", lv.dc === false);
 
@@ -790,7 +790,7 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   const expect = Math.round(MONSTERS.slime.hp * (0.7 + 0.3 * 1) * 1 * 1 * 1 * 1.6);
   check("몹 체력 ×1.6", Math.abs(s1.mhp - expect) <= 1, `${s1.mhp} vs ${expect}`);
   const msgs: ServerMsg[] = [];
-  const gs = new Game([{ id: 1, name: "Snap", color: 0, cls: "warrior" }], (m) => msgs.push(m), () => {}, () => {});
+  const gs = new Game([{ id: 1, name: "Snap", color: 0, cls: "warrior" }], (m) => msgs.push(m), (_id, m) => msgs.push(m), () => {});
   for (let i = 0; i < 30; i++) gs.tick();
   const snaps = msgs.filter((m) => m.t === "snap") as Extract<ServerMsg, { t: "snap" }>[];
   check("스냅샷 15Hz (30틱에 15번)", snaps.length === 15, `${snaps.length}`);
@@ -1057,6 +1057,75 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   gc.zones = [];
   for (let i = 0; i < 130; i++) GC.updateCardFx(kp);
   check("유성 소환: 4초마다 유성", gc.zones.some((z) => z.kind === "meteor"));
+}
+
+// ---------- v1.5: 보스 유물 · 이벤트 방 · 화면 근처만 전송 ----------
+{
+  const sent: { id: number; m: ServerMsg }[] = [];
+  const gr = new Game(
+    [{ id: 1, name: "R", color: 0, cls: "warrior" }, { id: 2, name: "S", color: 1, cls: "archer" }],
+    () => {}, (id, m) => sent.push({ id, m }), () => {},
+  );
+  const GR = gr as any;
+  const [ra, rb] = [gr.players.get(1)!, gr.players.get(2)!];
+  GR.clearWorld();
+  const offer = sent.find((x) => x.id === 1 && x.m.t === "relics") as { m: Extract<ServerMsg, { t: "relics" }> } | undefined;
+  check("보스 처치 → 유물 3개 제시", !!offer && offer.m.options?.length === 3 && offer.m.options.every((id) => CARD_BY_ID[id].rarity === "relic"));
+  gr.handleRelic(1, 1);
+  check("유물 고르기", ra.cards.includes(offer!.m.options![1]) && !ra.relicOpts);
+  GR.leaveRest();
+  check("안 고른 사람은 휴게소를 떠날 때 첫 번째 자동", rb.cards.some((id) => CARD_BY_ID[id].rarity === "relic"));
+  check("유물은 카드 뽑기에 안 나옴", [...Array(40)].every(() => GR.rollCards(ra).every((id: string) => CARD_BY_ID[id].rarity !== "relic")));
+  // 불사조 깃털
+  gr.giveCard(ra, "r_phoenix");
+  ra.phoenixUsed = false; ra.invulnT = 0; ra.god = false;
+  gr.hurtPlayer(ra, 99999, true);
+  check("불사조 깃털: 한 번 바로 일어남", !ra.ghost && ra.hp > 0);
+  ra.invulnT = 0;
+  gr.hurtPlayer(ra, 99999, true);
+  check("두 번째엔 쓰러짐", ra.ghost);
+  // 황금 러시
+  const ge = new Game([{ id: 1, name: "G", color: 0, cls: "warrior" }], () => {}, () => {}, () => {});
+  const GE = ge as any;
+  GE.startGoldRush();
+  for (let i = 0; i < 60; i++) ge.tick();
+  check("황금 러시: 황금 슬라임 등장", ge.monsters.some((m) => m.kind === "gold_slime"));
+  const gp = ge.players.get(1)!;
+  gp.god = true;
+  const gs = ge.monsters.find((m) => m.kind === "gold_slime")!;
+  gs.spawnT = 0;
+  const gx = gs.x;
+  gp.x = gs.x - 30; gp.y = gs.y;
+  for (let i = 0; i < 10; i++) GE.updateMonster(gs);
+  check("황금 슬라임은 도망감", gs.x > gx || Math.abs(gs.y - gp.y) > 1);
+  for (let i = 0; i < 30 * 26; i++) ge.tick();
+  check("황금 러시 25초 뒤 카드 선택", GE.phase === "cards");
+  // 저주받은 제단
+  const ga = new Game([{ id: 1, name: "A", color: 0, cls: "warrior" }], () => {}, () => {}, () => {});
+  const GA = ga as any;
+  GA.startAltar();
+  const ap = ga.players.get(1)!;
+  ap.x = GA.altar.x; ap.y = GA.altar.y;
+  const n0 = ap.cards.length, hp0 = ap.hp;
+  ga.handleAltar(1);
+  check("제단: 체력 30%를 바치고 전설 카드", ap.cards.length === n0 + 1 && ap.hp < hp0 && CARD_BY_ID[ap.cards[ap.cards.length - 1]].rarity === "legend");
+  ga.handleAltar(1);
+  check("제단은 한 번만", ap.cards.length === n0 + 1);
+  // 화면 근처만 전송
+  const snaps: { id: number; m: ServerMsg }[] = [];
+  const gv = new Game([{ id: 1, name: "V1", color: 0, cls: "warrior" }, { id: 2, name: "V2", color: 1, cls: "mage" }], () => {}, (id, m) => snaps.push({ id, m }), () => {});
+  const GV2 = gv as any;
+  const [v1, v2] = [gv.players.get(1)!, gv.players.get(2)!];
+  gv.monsters = [];
+  v2.x = v1.x + 2000;
+  const near = gv.spawnMonster("slime", { x: v1.x + 50, y: v1.y })!;
+  near.spawnT = 0;
+  GV2.sendSnapshot(true);
+  const s1 = snaps.find((x) => x.id === 1 && x.m.t === "snap")!.m as Extract<ServerMsg, { t: "snap" }>;
+  const s2 = snaps.find((x) => x.id === 2 && x.m.t === "snap")!.m as Extract<ServerMsg, { t: "snap" }>;
+  check("화면 근처 몬스터만 보냄", s1.mz.some((t) => t[0] === near.id) && !s2.mz.some((t) => t[0] === near.id));
+  const other = s1.players.find((p) => p.id === 2)!;
+  check("남의 쿨타임·돈은 안 보냄", other.cds === undefined && other.gold === undefined && s1.players.find((p) => p.id === 1)!.cds !== undefined);
 }
 
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");

@@ -57,6 +57,15 @@ export class GameScene extends Phaser.Scene {
   myId = 0;
   /** DOM 창(상점 등)이 열려 있으면 게임 입력을 막음 */
   uiOpen = false;
+  private altarGfx: Phaser.GameObjects.Graphics | null = null;
+  private altarTimer: Phaser.Time.TimerEvent | null = null;
+
+  /** 제단까지 거리 (없으면 무한) */
+  nearAltar() {
+    const a = this.stage?.altar;
+    if (!a) return Infinity;
+    return Math.hypot(this.local.x - a.x, this.local.y - a.y);
+  }
   /** 채팅 말풍선: 플레이어 id → 내용과 사라질 시각 */
   private chats = new Map<number, { text: string; until: number }>();
 
@@ -394,6 +403,31 @@ export class GameScene extends Phaser.Scene {
       return img;
     });
 
+    // v1.5 저주받은 제단: 보랏빛으로 맥동하는 원 + 제단 돌
+    this.altarGfx?.destroy();
+    this.altarGfx = null;
+    this.altarTimer?.remove();
+    this.altarTimer = null;
+    if (st.altar) {
+      const a = st.altar;
+      const g = this.add.graphics().setDepth(a.y - 2);
+      this.altarGfx = g;
+      const draw = (t: number) => {
+        g.clear();
+        const pulse = 0.5 + 0.5 * Math.sin(t / 300);
+        g.fillStyle(0x6020a0, 0.18 + 0.15 * pulse).fillCircle(a.x, a.y + 6, 30);
+        g.lineStyle(1, 0xc060ff, 0.6 + 0.4 * pulse).strokeCircle(a.x, a.y + 6, 26);
+        for (let i = 0; i < 5; i++) {
+          const an1 = (i / 5) * Math.PI * 2 - Math.PI / 2, an2 = ((i + 2) / 5) * Math.PI * 2 - Math.PI / 2;
+          g.lineBetween(a.x + Math.cos(an1) * 24, a.y + 6 + Math.sin(an1) * 24, a.x + Math.cos(an2) * 24, a.y + 6 + Math.sin(an2) * 24);
+        }
+        g.fillStyle(0x3a3448, 1).fillRect(a.x - 9, a.y - 6, 18, 12);
+        g.fillStyle(0x5a5068, 1).fillRect(a.x - 11, a.y - 9, 22, 4);
+        g.fillStyle(0xff3040, 0.7 + 0.3 * pulse).fillRect(a.x - 2, a.y - 13, 4, 4);
+      };
+      draw(0);
+      this.altarTimer = this.time.addEvent({ delay: 60, loop: true, callback: () => draw(this.time.now) });
+    }
     this.tent?.destroy();
     this.tent = null;
     if (st.market) {
@@ -553,6 +587,46 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------- 메인 루프 ----------
+  /** v1.5 보스 등장: 카메라가 보스에게 다가가 확대 → 포효 → 원래대로 */
+  private introCamOn = false;
+  private introKind = "";
+  private introT = 0;
+  startIntroCam(kind: string) {
+    this.introKind = kind;
+    this.introT = 0;
+    this.introCamOn = true;
+  }
+  private updateIntroCam(deltaMs: number) {
+    if (!this.introCamOn) return;
+    this.introT += deltaMs;
+    const cam = this.cameras.main;
+    const boss = this.latest()?.monsters.find((m) => m.k === this.introKind);
+    const tx = boss?.x ?? this.local.x, ty = (boss?.y ?? this.local.y) - 10;
+    const k = Math.min(1, this.introT / 600);
+    const ease = k * k * (3 - 2 * k);
+    if (this.introT < 1500) {
+      // 0~0.6초: 보스 쪽으로 이동하며 확대, 0.7초: 포효 흔들림
+      const cx = this.local.x + (tx - this.local.x) * ease;
+      const cy = this.local.y + (ty - this.local.y) * ease;
+      cam.setZoom(1 + 1.2 * ease);
+      cam.centerOn(Math.round(cx), Math.round(cy));
+      if (this.introT > 700 && this.introT - deltaMs <= 700) {
+        this.shake(600, 0.02);
+        cam.flash(250, 255, 60, 40);
+        if (boss) this.ring(boss.x, boss.y - 8, 70, 0xff4030, 600);
+      }
+    } else if (this.introT < 4000) {
+      cam.setZoom(2.2);
+      cam.centerOn(Math.round(tx), Math.round(ty));
+    } else {
+      // 끝: 원래 시점으로
+      const b = Math.min(1, (this.introT - 4000) / 300);
+      cam.setZoom(2.2 - 1.2 * b);
+      cam.centerOn(Math.round(tx + (this.local.x - tx) * b), Math.round(ty + (this.local.y - ty) * b));
+      if (b >= 1) { this.introCamOn = false; cam.setZoom(1); }
+    }
+  }
+
   /** 히트스톱: 이 시각까지 화면을 아주 잠깐 멈춤 (치명타·보스 처치) */
   private hitStopUntil = 0;
 
@@ -568,6 +642,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, deltaMs: number) {
+    // v1.5 프레임 감시: 40fps 아래가 4초 이어지면 자동 간소화 (감자 모드면 이미 가벼움)
+    this.fpsClock += deltaMs;
+    if (this.fpsClock >= 1000) {
+      this.fpsClock = 0;
+      const fps = this.game.loop.actualFps;
+      if (!document.hidden && fps < 40) this.lowFpsSec++;
+      else this.lowFpsSec = 0;
+      if (this.lowFpsSec >= 4 && !this.autoLite && !settings.potato) {
+        this.autoLite = true;
+        this.onAutoLite();
+      }
+    }
+    this.updateIntroCam(deltaMs);
     if (!this.stage || !this.snaps.length) return;
     if (performance.now() < this.hitStopUntil) return;
     const dt = deltaMs / 1000;
@@ -639,7 +726,7 @@ export class GameScene extends Phaser.Scene {
         // 기록도 같이 옮겨서 같은 오차를 두 번 고치지 않게
         for (const h of this.hist) { h.x += cx; h.y += cy; }
       }
-      this.cameras.main.centerOn(Math.round(this.local.x), Math.round(this.local.y));
+      if (!this.introCamOn) this.cameras.main.centerOn(Math.round(this.local.x), Math.round(this.local.y));
     }
 
     // 입력 전송 (30Hz)
@@ -1212,14 +1299,31 @@ export class GameScene extends Phaser.Scene {
   // ---------- 이펙트 ----------
   /** 감자 모드면 화면 흔들림 없음 */
   private shake(duration: number, intensity: number) {
-    if (!settings.potato) this.cameras.main.shake(duration, intensity);
+    if (!settings.potato) this.cameras.main.shake(duration, this.autoLite ? intensity * 0.5 : intensity);
+  }
+
+  /** v1.5 지금 떠 있는 파티클 수 (상한을 넘으면 새 파티클을 줄임) */
+  private liveParticles = 0;
+  /** v1.5 프레임이 계속 낮으면 이펙트를 자동으로 줄임 */
+  autoLite = false;
+  private lowFpsSec = 0;
+  private fpsClock = 0;
+  onAutoLite: () => void = () => {};
+  private get lite() {
+    return settings.potato || this.autoLite;
   }
 
   private pixelBurst(x: number, y: number, n: number, colors: number[], spread: number, life: number) {
     if (settings.potato) return;
+    // 상한: 동시에 300개까지, 많아지면 개수를 줄이고, 자동 간소화면 1/3
+    const budget = 300 - this.liveParticles;
+    if (budget <= 0) return;
+    n = Math.min(budget, this.autoLite ? Math.ceil(n / 3) : this.liveParticles > 150 ? Math.ceil(n / 2) : n);
     for (let i = 0; i < n; i++) {
       const col = colors[i % colors.length];
       const px = this.track(this.add.rectangle(x, y, 2, 2, col).setDepth(y + 20));
+      this.liveParticles++;
+      px.once("destroy", () => { this.liveParticles--; });
       const ang = Math.random() * Math.PI * 2;
       const d = spread * (0.4 + Math.random() * 0.6);
       this.tweens.add({
@@ -1241,7 +1345,8 @@ export class GameScene extends Phaser.Scene {
   private dmgNum(x: number, y: number, v: number, kind: "hit" | "crit" | "big") {
     const box = document.getElementById("chat-bubbles");
     if (!box) return;
-    if (kind === "hit" && box.childElementCount > 70) return;
+    // 숫자가 너무 많으면 작은 숫자부터 생략 (자동 간소화면 더 적게)
+    if (kind === "hit" && box.childElementCount > (this.autoLite ? 25 : 55)) return;
     const s = this.toScreen(x + (Math.random() * 10 - 5), y - 10 - Math.random() * 4);
     const el = document.createElement("div");
     el.className = `dmg-num ${kind}`;
@@ -1254,7 +1359,7 @@ export class GameScene extends Phaser.Scene {
 
   /** v1.4 번쩍 원 (폭발·스킬이 더 화려하게) */
   private flashCircle(x: number, y: number, r: number, color: number, life = 160) {
-    if (settings.potato) return;
+    if (this.lite) return;
     const c = this.track(this.add.circle(x, y, r, color, 0.55).setDepth(y + 30).setBlendMode(Phaser.BlendModes.ADD));
     this.tweens.add({ targets: c, alpha: 0, scale: 1.25, duration: life, ease: "Quad.easeOut", onComplete: () => c.destroy() });
   }
