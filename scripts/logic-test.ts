@@ -963,8 +963,9 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   // 주술사: 졸개 소환
   g1.monsters = [];
   const sm = g1.spawnMonster("summoner", { x: p.x + 120, y: p.y })!;
-  sm.spawnT = 0; sm.atkCd = 0;
-  G1.updateMonster(sm);
+  sm.spawnT = 0;
+  // 졸개 자리가 무작위라 벽에 막힐 수 있어서 몇 번 시도
+  for (let k = 0; k < 6 && !g1.monsters.some((o: any) => o.summonBy === sm.id); k++) { sm.atkCd = 0; sm.busyT = 0; G1.updateMonster(sm); }
   check("해골 주술사: 졸개 소환", g1.monsters.filter((o: any) => o.summonBy === sm.id).length >= 1);
   // 탄막 술사
   g1.monsters = []; g1.projs = [];
@@ -1126,6 +1127,57 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   check("화면 근처 몬스터만 보냄", s1.mz.some((t) => t[0] === near.id) && !s2.mz.some((t) => t[0] === near.id));
   const other = s1.players.find((p) => p.id === 2)!;
   check("남의 쿨타임·돈은 안 보냄", other.cds === undefined && other.gold === undefined && s1.players.find((p) => p.id === 1)!.cds !== undefined);
+}
+
+// ---------- v1.6: 직업 각성 · 대장간 ----------
+{
+  const { CLASSES: CL16, CLASS_IDS: IDS16, SKILL_UNLOCK: SU } = await import("../shared/classes");
+  const { canForge } = await import("../shared/cards");
+  check("각성: Lv15에 5번째 스킬", SU[4] === 15 && IDS16.every((c) => CL16[c].skills.length === 5 && CL16[c].skills[4].unlock === 15));
+  for (const cls of IDS16) {
+    const ga = new Game([{ id: 1, name: "A", color: 0, cls }, { id: 2, name: "B", color: 1, cls: "warrior" }], () => {}, () => {}, () => {});
+    const GA = ga as any;
+    const p = ga.players.get(1)!;
+    for (const q of ga.players.values()) q.god = true;
+    ga.monsters = [];
+    const ms = [0, 1, 2].map((i) => { const m = ga.spawnMonster("slime", { x: p.x + 40 + i * 12, y: p.y })!; m.spawnT = 0; m.hp = m.mhp = 5000; return m; });
+    p.level = 14;
+    ga.handleCast(1, 4, p.x + 40, p.y);
+    const lockedOk = p.cds[4] === 0;
+    p.level = 15;
+    ga.handleCast(1, 4, p.x + 40, p.y);
+    for (let i = 0; i < 90; i++) ga.tick();
+    const hurt = ms.some((m) => m.hp < 5000);
+    const buff = (p.sanctT ?? 0) > 0 || (p.banquetT ?? 0) > 0 || GA.pets.some((pt: any) => pt.kind === "ghost") || ga.zones.length > 0;
+    check(`각성기 동작: ${CL16[cls].name} 「${CL16[cls].skills[4].name}」`, lockedOk && p.cds[4] > 30 && (hurt || buff), `hurt=${hurt} buff=${buff}`);
+  }
+  // 성역: 받는 피해 -40%
+  const gs = new Game([{ id: 1, name: "C", color: 0, cls: "cleric" }, { id: 2, name: "D", color: 1, cls: "warrior" }], () => {}, () => {}, () => {});
+  const GS16 = gs as any;
+  const [cl, wa] = [gs.players.get(1)!, gs.players.get(2)!];
+  cl.level = 15;
+  wa.x = cl.x + 10; wa.y = cl.y;
+  gs.handleCast(1, 4, cl.x, cl.y);
+  GS16.updatePlayer(cl);
+  GS16.updateAwaken(cl);
+  wa.invulnT = 0;
+  const h0 = wa.hp;
+  gs.hurtPlayer(wa, 20, true);
+  check("성역: 동료 받는 피해 -40%", Math.abs((h0 - wa.hp) - 20 * wa.stats.dmgTakenMul * 0.6) < 0.01, `${(h0 - wa.hp).toFixed(1)}`);
+  // 대장간
+  check("대장간: 수치 카드는 강화 가능, 즉시 효과 카드는 불가", canForge("muscle") && !canForge("earlyedu") && !canForge("r_phoenix"));
+  const gf = new Game([{ id: 1, name: "F", color: 0, cls: "warrior" }], () => {}, () => {}, () => {});
+  const GF = gf as any;
+  const fp = gf.players.get(1)!;
+  gf.giveCard(fp, "muscle");
+  GF.startStage("rest", "market");
+  fp.x = GF.market.x; fp.y = GF.market.y;
+  fp.gold = 100;
+  const atk0 = fp.stats.atkMul;
+  gf.handleForge(1, "muscle");
+  check("대장간: 강화하면 효과가 한 번 더 + 돈 차감", fp.stats.atkMul > atk0 && fp.gold === 60);
+  gf.handleForge(1, "muscle");
+  check("대장간: 카드마다 한 번만", fp.gold === 60);
 }
 
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");

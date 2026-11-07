@@ -1,6 +1,6 @@
 // 이 브라우저에 저장되는 설정 (편의 기능 켜고 끄기, 키 설정)
 
-export type KeyAction = "skill1" | "skill2" | "skill3" | "skill4" | "dash" | "market" | "ready" | "menu";
+export type KeyAction = "skill1" | "skill2" | "skill3" | "skill4" | "skill5" | "dash" | "market" | "ready" | "menu";
 
 export interface Settings {
   aimBar: boolean;
@@ -27,6 +27,7 @@ export const KEY_LABEL: Record<KeyAction, string> = {
   skill2: "스킬 2",
   skill3: "스킬 3",
   skill4: "스킬 4",
+  skill5: "각성기 (5)",
   dash: "대시",
   market: "암시장·도박꾼 열기",
   ready: "휴게소 준비 완료",
@@ -38,7 +39,7 @@ const DEFAULTS: Settings = {
   skillRange: true,
   chargeLine: true,
   castMode: "hold",
-  keys: { skill1: "1", skill2: "2", skill3: "3", skill4: "4", dash: " ", market: "e", ready: "enter", menu: "tab" },
+  keys: { skill1: "1", skill2: "2", skill3: "3", skill4: "4", skill5: "5", dash: " ", market: "e", ready: "enter", menu: "tab" },
   sound: true,
   volume: 0.9,
   sfxVolume: 1,

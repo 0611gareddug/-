@@ -75,6 +75,8 @@ export type ClientMsg =
   | { t: "talent"; branch: number }
   | { t: "vote"; idx: number }
   | { t: "buy"; tier: GachaTier }
+  /** v1.6 대장간: 카드 강화 */
+  | { t: "forge"; id: string }
   | { t: "gamble"; game: GambleGame; bet: number; pick?: "odd" | "even" }
   | { t: "trial"; yes: boolean }
   | { t: "restReady"; ready: boolean }
@@ -150,6 +152,9 @@ export interface SnapPlayer {
   song?: boolean;
   /** 회전 칼날 수 */
   ob?: number;
+  /** v1.6 각성함 (Lv15) · 각성기 오라 (1 성역, 2 만한전석) */
+  aw?: boolean;
+  sa?: number;
   /** 연속 처치 콤보 (3 이상일 때만) */
   cb?: number;
   /** 코스튬 (모자·망토·발자국·레벨업 이펙트·칭호) — 바뀔 때만 옴 */
@@ -220,7 +225,9 @@ export type FxKind =
   | "coin" | "lvl" | "num" | "zap" | "line" | "spin" | "shield" | "blink" | "crit" | "fall" | "bolt"
   | "flame" | "food" | "sleep" | "encore"
   // v1.4: 서리 대시 · 보스 광폭화
-  | "frost" | "rage";
+  | "frost" | "rage"
+  // v1.6 각성
+  | "awaken";
 
 export interface Fx {
   k: FxKind;
@@ -458,6 +465,8 @@ export type ServerMsg =
   | { t: "trialEnd"; success: boolean; go?: boolean }
   | { t: "restStatus"; ready: number[]; total: number; time: number }
   | { t: "gacha"; card: string | null; tier: GachaTier; gold: number }
+  /** v1.6 대장간 결과: 강화한 카드 목록 */
+  | { t: "forged"; id: string; upgraded: string[]; gold: number }
   | {
       t: "gambleResult";
       game: GambleGame;

@@ -104,7 +104,7 @@ export function baseStats(maxHp: number): Stats {
     goldMul: 1, aimShake: 0, reverseCtrl: 0, aggro: 0, hunger: 0, lowHpAtk: 0, nearAllyDR: 0,
     chargeBoost: 0, tauntBoost: 0, rainBoost: 0, sniper: 0, twinMeteor: 0, manaSurge: 0, blessLight: 0, doubleShield: 0,
     turretBonus: 0, napalm: 0, bigPot: 0, chef: 0, loud: 0, echo: 0, moody: 0,
-    baseAtk: 10, baseSpeed: 70, baseAtkCd: 0.45, skillFlat: 0, skillCdFlat: 0, dmgFlatReduce: 0, goldFlat: 0, areaFlat: 0, shurikenPlus: 0, assassin: 0, curseExt: 0, curseBoost: 0, slotCd: [0, 0, 0, 0],
+    baseAtk: 10, baseSpeed: 70, baseAtkCd: 0.45, skillFlat: 0, skillCdFlat: 0, dmgFlatReduce: 0, goldFlat: 0, areaFlat: 0, shurikenPlus: 0, assassin: 0, curseExt: 0, curseBoost: 0, slotCd: [0, 0, 0, 0, 0],
     orbit: 0, critBoom: 0, meteorRain: 0, frostDash: 0, killZap: 0,
     phoenix: 0, killHeal: 0, relicZap: 0, relicShield: 0,
   };
@@ -267,3 +267,23 @@ export const CARDS: CardDef[] = [
 export const CARD_BY_ID: Record<string, CardDef> = Object.fromEntries(CARDS.map((c) => [c.id, c]));
 
 export const GACHA_PRICE: Record<"common" | "rare" | "legend", number> = { common: 30, rare: 80, legend: 200 };
+
+/** v1.6 대장간: 카드 1장을 한 번 강화 (효과가 한 번 더 붙음) */
+export const FORGE_PRICE: Record<"common" | "rare" | "legend", number> = { common: 40, rare: 70, legend: 120 };
+const forgeMemo = new Map<string, boolean>();
+/** 강화할 수 있는 카드: 일반·희귀·전설 중 효과가 겹치는(두 번 적용하면 더 세지는) 카드만 */
+export function canForge(id: string): boolean {
+  const c = CARD_BY_ID[id];
+  if (!c || !(c.rarity in FORGE_PRICE)) return false;
+  let v = forgeMemo.get(id);
+  if (v === undefined) {
+    const noop: CardCtx = { healFull() {}, halfHp() {}, addXp() {}, grantRandom() {}, extraPicks() {}, skipPicks() {}, reroll() {}, team() {} };
+    const a = baseStats(100), b = baseStats(100);
+    c.apply(a, noop);
+    c.apply(b, noop);
+    c.apply(b, noop);
+    v = JSON.stringify(a) !== JSON.stringify(b);
+    forgeMemo.set(id, v);
+  }
+  return v;
+}

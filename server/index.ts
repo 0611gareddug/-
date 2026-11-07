@@ -9,7 +9,7 @@ import { LobbyPlay } from "./lobbyPlay";
 import { CLASS_IDS, type ClassId } from "../shared/classes";
 import type { ClientMsg, RoomMode, ServerMsg } from "../shared/protocol";
 import { Game } from "./game";
-import { canHardcore, getCodex, getProfile, getRecords, getSave, savesFor, setEquip, unlockAch } from "./store";
+import { canHardcore, cloudOn, flushStore, getCodex, getProfile, getRecords, getSave, initStore, savesFor, setEquip, unlockAch } from "./store";
 import { ACHIEVEMENTS, SLOT_NAME, type Equip } from "../shared/achievements";
 
 // 개발 모드에선 Vite가 /ws 를 2567로 프록시하므로 PORT 환경변수를 무시한다
@@ -468,6 +468,9 @@ wss.on("connection", (ws) => {
       case "buy":
         game?.handleBuy(me.id, msg.tier);
         break;
+      case "forge":
+        game?.handleForge(me.id, String(msg.id));
+        break;
       case "restReady":
         game?.handleRestReady(me.id, !!msg.ready);
         break;
@@ -576,6 +579,15 @@ wss.on("connection", (ws) => {
   });
 });
 
+// v1.6: 클라우드 기록을 먼저 불러오고 서버 시작
+await initStore();
 server.listen(PORT, () => {
-  console.log(`양배추 용사단 서버: http://localhost:${PORT}  (WebSocket /ws)`);
+  console.log(`양배추 용사단 서버: http://localhost:${PORT}  (WebSocket /ws)${cloudOn ? " · 기록 클라우드 저장 켜짐" : ""}`);
 });
+// 업데이트·재시작 때 기록을 바로 저장하고 끄기
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    void flushStore().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 4000);
+  });
+}

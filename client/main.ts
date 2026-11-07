@@ -3,7 +3,7 @@ import "galmuri/dist/galmuri.css";
 import "./style.css";
 import Phaser from "phaser";
 import { CLASSES, CLASS_IDS, SKILL_UNLOCK, type ClassId } from "../shared/classes";
-import { CARD_BY_ID, GACHA_PRICE, RARITY_NAME } from "../shared/cards";
+import { CARD_BY_ID, FORGE_PRICE, GACHA_PRICE, RARITY_NAME, canForge } from "../shared/cards";
 import { MARKET_RANGE, PLAYER_COLORS, ROUNDS_PER_WORLD, VIEW_H, VIEW_W } from "../shared/constants";
 import { type SnapMonster, type SnapProj, type SnapshotWire, GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
 import { DIFFS, MONSTERS, WORLDS, WORLD_COUNT, diffDmgMul, diffHpMul, diffName } from "../shared/worlds";
@@ -18,6 +18,7 @@ import { closeModeSelect, initModeSelect, isModeSelectOpen, miniBanner, modeIdOf
 import { Net } from "./net";
 import { BODIES, heroPalette, heroRows, monsterPalette, paint } from "./sprites";
 import { paintCard } from "./cardArt";
+import { initTouch } from "./touch";
 import { TALENTS, TALENT_TIERS, tier } from "../shared/talents";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -26,6 +27,8 @@ type ScreenId = (typeof screens)[number];
 const BLOCKING: ScreenId[] = ["cards", "vote", "market", "gamble", "trial", "result"];
 function show(...ids: ScreenId[]) {
   for (const s of screens) $(s).classList.toggle("hidden", !ids.includes(s));
+  // 모바일 조작 버튼은 게임 화면(HUD)일 때만
+  document.body.classList.toggle("in-game", ids.includes("hud"));
   refreshUiOpen();
 }
 /** 창(카드·상점·메뉴 등)이 열려 있으면 게임 입력을 막음 */
@@ -408,6 +411,7 @@ async function ensureGame(): Promise<GameScene> {
   scene.net = net;
   scene.myId = myId;
   scene.onSnapshot = updateHud;
+  scene.touch.on = document.body.classList.contains("touch");
   scene.onAutoLite = () => toast("화면이 버벅여서 이펙트를 자동으로 줄였어요 (설정 → 성능 → 감자 모드로 더 가볍게)");
   game = new Phaser.Game({
     type: Phaser.AUTO,
@@ -756,6 +760,37 @@ function renderMarket() {
     b.onclick = () => net.send({ t: "buy", tier });
     boxes.append(b);
   });
+  renderForge(gold);
+}
+
+/** v1.6 대장간: 내 카드 중 강화할 수 있는 것 */
+let myUpgraded = new Set<string>();
+function renderForge(gold: number) {
+  const me = lastSnap?.players.find((p) => p.id === myId);
+  const list = $("forge-list");
+  list.innerHTML = "";
+  const ids = [...new Set(me?.cards ?? [])].filter((id) => canForge(id));
+  if (!ids.length) {
+    list.innerHTML = '<span class="muted">강화할 수 있는 카드가 없어요</span>';
+    return;
+  }
+  for (const id of ids) {
+    const c = CARD_BY_ID[id];
+    const price = FORGE_PRICE[c.rarity as keyof typeof FORGE_PRICE];
+    const done = myUpgraded.has(id);
+    const el = document.createElement("div");
+    el.className = `forge-item r-${c.rarity}` + (done ? " done" : gold < price ? " poor" : "");
+    el.append(cardIcon(id, 22));
+    const t = document.createElement("span");
+    t.textContent = `${c.name}${done ? " +1" : ""}`;
+    const pr = document.createElement("span");
+    pr.className = "fp";
+    pr.textContent = done ? "강화됨" : `${price}원`;
+    el.append(t, pr);
+    el.title = `${c.desc} → 한 번 더`;
+    if (!done) el.onclick = () => net.send({ t: "forge", id });
+    list.append(el);
+  }
 }
 
 /** 휴게소 가판대 열기: 암시장 또는 도박꾼 */
@@ -830,6 +865,14 @@ function setRestReady(v: boolean) {
 }
 $("btn-rest-ready").onclick = () => setRestReady(!restReady);
 
+/** E: 가판대 열기·닫기 / 보물 상자 / 제단 (키보드·모바일 버튼 공용) */
+function interact() {
+  if (visible("market") || visible("gamble")) closeMarket();
+  else if (stage?.kind === "rest" && nearMarket() && !visible("cards") && !visible("vote")) openMarket();
+  else if (stage?.kind === "treasure" && !chestBusted) net.send({ t: "chest" });
+  else if (stage?.kind === "altar") net.send({ t: "chest" });
+}
+
 // ---------- 키보드 ----------
 window.addEventListener("keydown", (e) => {
   if (isCapturingKey()) return;
@@ -854,12 +897,7 @@ window.addEventListener("keydown", (e) => {
     if (visible("cards")) pickCard(n - 1);
     else if (visible("vote")) castVote(n - 1);
   }
-  if (isKey(e, "market")) {
-    if (visible("market") || visible("gamble")) closeMarket();
-    else if (stage?.kind === "rest" && nearMarket() && !visible("cards") && !visible("vote")) openMarket();
-    else if (stage?.kind === "treasure" && !chestBusted) net.send({ t: "chest" });
-    else if (stage?.kind === "altar") net.send({ t: "chest" });
-  }
+  if (isKey(e, "market")) interact();
   if (e.key === "Escape" && (visible("market") || visible("gamble"))) closeMarket();
   if (isKey(e, "ready") && stage?.kind === "rest" && visible("hud")) setRestReady(!restReady);
 });
@@ -867,12 +905,24 @@ window.addEventListener("keydown", (e) => {
 function renderHelp() {
   const k = settings.keys;
   const skill = settings.castMode === "instant" ? "누르면 시전" : "누른 채 클릭";
-  $("hud-help").textContent = `WASD 이동 · 좌클릭 공격 · ${displayKey(k.dash)} 대시 · ${[k.skill1, k.skill2, k.skill3, k.skill4].map(displayKey).join("/")} ${skill} = 스킬 · ${displayKey(k.market)} 가판대 · ${displayKey(k.menu)} 메뉴`;
+  $("hud-help").textContent = `WASD 이동 · 좌클릭 공격 · ${displayKey(k.dash)} 대시 · ${[k.skill1, k.skill2, k.skill3, k.skill4, k.skill5].map(displayKey).join("/")} ${skill} = 스킬 · ${displayKey(k.market)} 가판대 · ${displayKey(k.menu)} 메뉴`;
 }
 renderHelp();
 onSettingsChange(renderHelp);
 
 initModeSelect();
+// v1.6 모바일 조작
+initTouch({
+  move: (mx, my) => { if (scene) { scene.touch.mx = mx; scene.touch.my = my; } },
+  attack: (on) => { if (scene) scene.touch.atk = on; },
+  dash: () => scene?.dashNow(),
+  cast: (slot) => scene?.castAuto(slot),
+  interact: () => interact(),
+  ready: () => { if (stage?.kind === "rest" && visible("hud")) setRestReady(!restReady); },
+  chat: () => setChat(!chatOpen),
+  menu: () => { if (lobbyInfo || stage) toggleMenu(); },
+  me: () => lastSnap?.players.find((p) => p.id === myId) ?? null,
+});
 // 개발자 도구 감지: 게임 중이면 로비로 튕기고, 로비·타이틀이면 게임에서 나감
 initGuard(() => {
   if (stage) {
@@ -1471,6 +1521,15 @@ net.onMessage = async (m: ServerMsg) => {
     case "relics":
       showRelics(m.options);
       break;
+    case "forged":
+      myUpgraded = new Set(m.upgraded);
+      sfx.fanfare();
+      toast(`「${CARD_BY_ID[m.id]?.name ?? m.id}」 강화 완료! (지금 ${m.gold}원)`);
+      if (visible("market")) {
+        $("market-gold").textContent = `${m.gold}원`;
+        renderForge(m.gold);
+      }
+      break;
     case "altarResult":
       sfx.fanfare();
       toast(`제단이 응답했다! 「${CARD_BY_ID[m.card]?.name ?? m.card}」 획득`);
@@ -1501,6 +1560,7 @@ net.onMessage = async (m: ServerMsg) => {
       break;
     case "result":
       lastWorld = 0;
+      myUpgraded = new Set();
       bgm.play(null);
       if (m.zone !== undefined) panicEnd(m.win);
       else if (m.win) sfx.fanfare();

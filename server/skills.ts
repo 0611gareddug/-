@@ -208,7 +208,8 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
       g.fx.push({ k: "encore", x: p.x, y: p.y, r });
       for (const q of g.players.values()) {
         if (q.ghost || Math.hypot(q.x - p.x, q.y - p.y) > r) continue;
-        q.cds = q.cds.map((c, i) => (q === p && i === 0 ? c : 0));
+        // 각성기(5번)는 초기화하지 않음
+        q.cds = q.cds.map((c, i) => ((q === p && i === 0) || i === 4 ? c : 0));
       }
       break;
     }
@@ -353,6 +354,106 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
         n++;
       }
       if (!n) g.fx.push({ k: "sleep", x: p.x, y: p.y, r: 30 });
+      break;
+    }
+
+    // ---------- v1.6 각성기 (5번, Lv15) ----------
+    case "warrior4": {
+      // 천지개벽: 전방 130° 넓은 베기
+      const a0 = Math.atan2(y - p.y, x - p.x);
+      const r = def.range * area;
+      g.fx.push({ k: "swing", x: p.x, y: p.y, a: a0, r });
+      g.fx.push({ k: "awaken", x: Math.round(p.x + Math.cos(a0) * r * 0.5), y: Math.round(p.y + Math.sin(a0) * r * 0.5), r: Math.round(r * 0.7) });
+      for (const m of [...g.monsters]) {
+        if (m.spawnT > 0) continue;
+        const d = Math.hypot(m.x - p.x, m.y - p.y);
+        if (d > r + m.r) continue;
+        let diff = Math.atan2(m.y - p.y, m.x - p.x) - a0;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        if (Math.abs(diff) > 1.15) continue;
+        g.dealDamage(m, 70, p, { skill: true });
+        if (m.kind !== "pvp" && m.kind !== "dummy") m.stunT = Math.max(m.stunT, 1);
+      }
+      break;
+    }
+    case "archer4":
+      // 별빛 화살비: 5초 동안 0.3초마다 주변 적 3명에게
+      p.volleyT = 5;
+      p.volleyTick = 0;
+      g.fx.push({ k: "awaken", x: p.x, y: p.y, r: 40 });
+      break;
+    case "mage4": {
+      // 대유성우: 2초 동안 유성 8개
+      const r = def.radius * area;
+      for (let i = 0; i < 8; i++) {
+        const a = Math.random() * Math.PI * 2, d = Math.random() * r;
+        const mx = t.x + Math.cos(a) * d, my = t.y + Math.sin(a) * d;
+        if (!isWallAt(g.map, mx, my)) g.addZone("meteor", mx, my, 35, p.id, 30, 0.6 + i * 0.2);
+      }
+      break;
+    }
+    case "cleric4":
+      // 성역: 8초 동안 나를 따라오는 보호막 원
+      p.sanctT = 8;
+      g.fx.push({ k: "heal", x: p.x, y: p.y, r: def.radius });
+      g.fx.push({ k: "awaken", x: p.x, y: p.y, r: 60 });
+      break;
+    case "engineer4":
+      // 궤도 폭격: 1.5초 뒤 큰 폭발
+      g.addZone("meteor", t.x, t.y, def.radius * area, p.id, 90, 1.5);
+      break;
+    case "cook4":
+      // 만한전석: 6초 동안 주변 회복 + 공속
+      p.banquetT = 6;
+      g.fx.push({ k: "food", x: Math.round(p.x), y: Math.round(p.y), r: def.radius, pts: [Math.round(p.x), Math.round(p.y) - 30] });
+      g.fx.push({ k: "awaken", x: p.x, y: p.y, r: 60 });
+      break;
+    case "bard4": {
+      // 피날레: 주변 적 피해 + 기절, 주변 동료 쿨타임 절반
+      const r = def.radius * area;
+      g.fx.push({ k: "encore", x: p.x, y: p.y, r });
+      g.fx.push({ k: "awaken", x: p.x, y: p.y, r: Math.round(r * 0.8) });
+      for (const m of [...g.monsters]) {
+        if (m.spawnT > 0 || Math.hypot(m.x - p.x, m.y - p.y) > r + m.r) continue;
+        g.dealDamage(m, 50, p, { skill: true });
+        if (m.kind !== "pvp" && m.kind !== "dummy") m.stunT = Math.max(m.stunT, m.def.boss ? 0.8 : 2.5);
+      }
+      for (const q of g.players.values()) {
+        if (q.ghost || Math.hypot(q.x - p.x, q.y - p.y) > r) continue;
+        q.cds = q.cds.map((c, i) => (i === 4 ? c : c / 2));
+      }
+      break;
+    }
+    case "ninja4": {
+      // 그림자 난무: 무적 + 가까운 적 최대 10명을 차례로 베고 마지막 적 옆으로
+      const r = def.radius * area;
+      const targets = g.monsters
+        .filter((m) => m.spawnT <= 0 && m.kind !== "dummy" && m.kind !== "chest" && Math.hypot(m.x - p.x, m.y - p.y) < r)
+        .sort((m1, m2) => Math.hypot(m1.x - p.x, m1.y - p.y) - Math.hypot(m2.x - p.x, m2.y - p.y))
+        .slice(0, 10);
+      const pts: number[] = [Math.round(p.x), Math.round(p.y)];
+      for (const m of targets) {
+        pts.push(Math.round(m.x), Math.round(m.y));
+        g.dealDamage(m, 45, p, { skill: true });
+      }
+      const last = targets[targets.length - 1];
+      if (last && !isWallAt(g.map, last.x, last.y + 10)) { p.x = last.x; p.y = last.y + 10; }
+      g.fx.push({ k: "blink", x: p.x, y: p.y, pts });
+      g.fx.push({ k: "awaken", x: p.x, y: p.y, r: 40 });
+      p.invulnT = Math.max(p.invulnT, 1.6);
+      break;
+    }
+    case "necro4": {
+      // 망자의 군대: 유령 4체 + 주변 적 모두 저주
+      for (let i = 0; i < 4; i++) g.summon(p, "ghost", 10);
+      const r = def.radius * area;
+      for (const m of g.monsters) {
+        if (m.spawnT > 0 || m.kind === "dummy" || m.kind === "chest" || m.kind === "pvp" || Math.hypot(m.x - p.x, m.y - p.y) > r) continue;
+        m.curseT = Math.max(m.curseT ?? 0, 6 + p.stats.curseExt);
+        m.curseBy = p.id;
+        if (p.stats.curseBoost) m.curseBoost = true;
+      }
+      g.fx.push({ k: "awaken", x: p.x, y: p.y, r: 80 });
       break;
     }
 

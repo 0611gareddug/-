@@ -83,6 +83,28 @@ export class GameScene extends Phaser.Scene {
     this.comboEls.clear();
   }
 
+  /** v1.6 각성 오라: 발밑 금빛 고리 + 가끔 반짝임, 성역/만한전석은 범위 원 */
+  private auraGfx: Phaser.GameObjects.Graphics | null = null;
+  private auraFrame = -1;
+  private drawAura(p: SnapPlayer, x: number, y: number, now: number) {
+    if (!this.auraGfx) this.auraGfx = this.add.graphics();
+    const frame = Math.floor(now / 16);
+    if (frame !== this.auraFrame) { this.auraGfx.clear(); this.auraFrame = frame; }
+    if (p.ghost) return;
+    const g = this.auraGfx.setDepth(1);
+    if (p.sa) {
+      const r = p.sa === 1 ? 90 : 85;
+      const col = p.sa === 1 ? 0xf8e070 : 0xff9050;
+      g.fillStyle(col, 0.08).fillCircle(x, y, r);
+      g.lineStyle(1, col, 0.55 + 0.25 * Math.sin(now / 200)).strokeCircle(x, y, r);
+    }
+    if (!p.aw) return;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 260 + p.id);
+    g.fillStyle(0xffd040, 0.18 + 0.14 * pulse).fillEllipse(x, y + 4, 22 + pulse * 4, 8 + pulse * 2);
+    g.lineStyle(1, 0xfff0a0, 0.5 + 0.4 * pulse).strokeEllipse(x, y + 4, 24 + pulse * 4, 9 + pulse * 2);
+    if (!this.lite && Math.random() < 0.06) this.pixelBurst(x + (Math.random() - 0.5) * 14, y - 4 - Math.random() * 12, 1, [0xfff4a0, 0xffd040], 6, 600);
+  }
+
   /** v1.4 회전 칼날 (서버와 같은 각도 공식) */
   private orbitImgs = new Map<number, Phaser.GameObjects.Image[]>();
   private drawOrbit(p: SnapPlayer, x: number, y: number, _now: number) {
@@ -283,7 +305,7 @@ export class GameScene extends Phaser.Scene {
     const kb = this.input.keyboard!;
     this.keys = kb.addKeys("W,A,S,D,UP,DOWN,LEFT,RIGHT", false) as Record<string, Phaser.Input.Keyboard.Key>;
     // 스킬·대시 키는 설정에서 바꿀 수 있어서 DOM 키 이벤트로 직접 처리
-    const SKILL_KEYS = ["skill1", "skill2", "skill3", "skill4"] as const;
+    const SKILL_KEYS = ["skill1", "skill2", "skill3", "skill4", "skill5"] as const;
     const onDown = (e: KeyboardEvent) => {
       if (this.uiOpen || e.repeat || e.target instanceof HTMLInputElement) return;
       if (isKey(e, "dash")) {
@@ -573,9 +595,49 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** v1.6 모바일 조작 (조이스틱 방향 · 공격 버튼) */
+  touch = { on: false, mx: 0, my: 0, atk: false };
+
+  /** 가장 가까운 적 (자동 조준) */
+  private nearestFoe(range = 230) {
+    let best: SnapMonster | null = null;
+    let bd = range;
+    for (const m of this.latest()?.monsters ?? []) {
+      if (m.k === "chest" || (m.sp ?? 0) > 0) continue;
+      const d = Math.hypot(m.x - this.local.x, m.y - this.local.y);
+      if (d < bd) { bd = d; best = m; }
+    }
+    return best;
+  }
+  private lastFace = { x: 1, y: 0 };
+  private autoAim() {
+    const f = this.nearestFoe();
+    if (f) return { x: f.x, y: f.y };
+    return { x: this.local.x + this.lastFace.x * 40, y: this.local.y + this.lastFace.y * 40 };
+  }
+  /** 모바일: 스킬을 가까운 적(없으면 바라보는 쪽)에 바로 시전 */
+  castAuto(slot: number) {
+    if (this.uiOpen) return;
+    const me = this.latest()?.players.find((p) => p.id === this.myId);
+    if (!me || CLASSES[me.cls].skills[slot]?.aim === "passive") return;
+    const t = this.autoAim();
+    sfx.cast();
+    this.net.send({ t: "cast", slot, x: Math.round(t.x), y: Math.round(t.y) });
+  }
+  dashNow() {
+    if (!this.uiOpen) this.pressDash();
+  }
+
   private moveDir(rev = false) {
     const k = this.keys;
     if (this.uiOpen) return { mx: 0, my: 0 };
+    if (this.touch.on && (this.touch.mx || this.touch.my)) {
+      // 조이스틱: 8방향으로 (서버 입력이 방향키라서)
+      let mx = this.touch.mx > 0.38 ? 1 : this.touch.mx < -0.38 ? -1 : 0;
+      let my = this.touch.my > 0.38 ? 1 : this.touch.my < -0.38 ? -1 : 0;
+      if (rev) { mx = -mx; my = -my; }
+      return { mx, my };
+    }
     let mx = (k.D.isDown || k.RIGHT.isDown ? 1 : 0) - (k.A.isDown || k.LEFT.isDown ? 1 : 0);
     let my = (k.S.isDown || k.DOWN.isDown ? 1 : 0) - (k.W.isDown || k.UP.isDown ? 1 : 0);
     if (rev) { mx = -mx; my = -my; }
@@ -742,6 +804,17 @@ export class GameScene extends Phaser.Scene {
     st.ax = Math.round(world.x);
     st.ay = Math.round(world.y);
     st.atk = free && ptr.leftButtonDown() && !this.suppressAtk && this.aiming < 0;
+    if (this.touch.on) {
+      // 모바일: 조이스틱 이동 + 자동 조준 + 공격 버튼
+      const d = this.moveDir(false);
+      st.up = free && d.my < 0; st.down = free && d.my > 0;
+      st.left = free && d.mx < 0; st.right = free && d.mx > 0;
+      if (d.mx || d.my) { const l = Math.hypot(d.mx, d.my); this.lastFace = { x: d.mx / l, y: d.my / l }; }
+      const t = this.autoAim();
+      st.ax = Math.round(t.x);
+      st.ay = Math.round(t.y);
+      st.atk = free && this.touch.atk;
+    }
     // 입력은 바뀌었을 때 바로, 안 바뀌면 0.15초마다만 (네트워크 절약)
     const sig = `${+st.up}${+st.down}${+st.left}${+st.right}${+st.atk}${st.dashSeq}${Math.round(st.ax / 4)},${Math.round(st.ay / 4)}`;
     const changedIn = sig !== this.lastSig;
@@ -1118,6 +1191,8 @@ export class GameScene extends Phaser.Scene {
     v.root.setAlpha(p.off ? 0.55 : 1);
     // v1.4 카드 '회전 칼날'
     this.drawOrbit(p, x, y, now);
+    // v1.6 각성 오라 (Lv15) · 성역/만한전석 범위
+    this.drawAura(p, x, y, now);
     // 채팅 말풍선 (머리 위 4.5초, HTML)
     this.drawCombo(p, x, y);
     this.drawBubble(p, x, y);
@@ -1463,6 +1538,13 @@ export class GameScene extends Phaser.Scene {
         this.flashCircle(f.x, f.y, (f.r ?? 36) * 0.6, 0xa0e0ff, 200);
         this.ring(f.x, f.y, f.r ?? 36, 0x80d0ff, 350, true);
         this.pixelBurst(f.x, f.y, 14, [0xffffff, 0xa0e0ff, 0x60a0ff], f.r ?? 36, 450);
+        break;
+      case "awaken":
+        // v1.6 각성: 금빛 기둥 + 고리
+        this.flashCircle(f.x, f.y - 10, (f.r ?? 50) * 0.6, 0xfff0a0, 260);
+        this.ring(f.x, f.y, f.r ?? 50, 0xffd040, 500);
+        this.ring(f.x, f.y, (f.r ?? 50) * 1.5, 0xfff4a0, 700);
+        this.pixelBurst(f.x, f.y - 10, 24, [0xffd040, 0xfff4a0, 0xffffff], f.r ?? 50, 700);
         break;
       case "rage":
         // v1.4 보스 광폭화: 붉은 번쩍 + 충격파 + 큰 글자

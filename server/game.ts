@@ -5,7 +5,7 @@ import {
 } from "../shared/constants";
 import { CLASSES, CLASS_IDS, SKILL_UNLOCK, type ClassId, type ProjKind } from "../shared/classes";
 import {
-  CARDS, CARD_BY_ID, GACHA_PRICE, baseStats, type CardCtx, type Rarity, type Stats, type TeamFlag,
+  CARDS, CARD_BY_ID, FORGE_PRICE, GACHA_PRICE, baseStats, canForge, type CardCtx, type Rarity, type Stats, type TeamFlag,
 } from "../shared/cards";
 import { isWallAt, moveCircle, tileAt } from "../shared/collide";
 import type {
@@ -47,6 +47,14 @@ export interface Player extends Participant {
   droneT?: number;
   /** 닌자 천벌 돌진 (무적 + 보스 빼고 즉사) */
   lethalDash?: boolean;
+  /** v1.6 대장간에서 강화한 카드 */
+  upgraded?: string[];
+  /** v1.6 각성기: 성역(시전자) · 성역 보호 · 만한전석 · 별빛 화살비 */
+  sanctT?: number;
+  sanctBuffT?: number;
+  banquetT?: number;
+  volleyT?: number;
+  volleyTick?: number;
   /** v1.5 유물: 고를 선택지 · 불사조 사용함 · 번개/방패 타이머 · 제단 바침 */
   relicOpts?: string[] | null;
   phoenixUsed?: boolean;
@@ -437,7 +445,7 @@ export class Game {
         shield: 0, shieldT: 0, buffAtkT: 0, castHasteT: 0, spicyT: 0, feastT: 0, songOn: false,
         surgeT: 0, atkCount: 0, revClock: 0, idleT: 0,
         slowT: 0, poisonT: 0, burnT: 0, god: false, nocd: false,
-        cds: [0, 0, 0, 0], level: 1, xp: 0, gold: 0,
+        cds: [0, 0, 0, 0, 0], level: 1, xp: 0, gold: 0,
         options: null, pendingPicks: 0, skipPicks: 0, vote: -1, restReady: false,
         kills: 0, dmgDealt: 0, dmgTaken: 0, revives: 0, deaths: 0,
         respawnT: 0, score: 0, worldDeaths: 0, tal: {},
@@ -513,6 +521,9 @@ export class Game {
           c.apply(p.stats, this.noopCtx());
           p.cards.push(id);
         }
+        // 대장간 강화도 다시 적용
+        p.upgraded = (s.up ?? []).filter((id) => p.cards.includes(id) && canForge(id));
+        for (const id of p.upgraded) CARD_BY_ID[id].apply(p.stats, this.noopCtx());
       } else {
         p.level = avg;
         p.stats = this.levelStats(p);
@@ -582,7 +593,7 @@ export class Game {
       p.ghost = false;
       p.invulnT = 2;
       p.score = 0;
-      p.cds = [0, 0, 0, 0];
+      p.cds = [0, 0, 0, 0, 0];
       this.monsters.push(this.proxyFor(p));
     });
     this.broadcast({
@@ -704,7 +715,7 @@ export class Game {
   handleCast(id: number, slot: number, x: number, y: number) {
     const p = this.players.get(id);
     if (!p || p.ghost || (this.phase !== "play" && this.phase !== "rest")) return;
-    if (slot < 0 || slot > 3 || p.level < SKILL_UNLOCK[slot] || p.cds[slot] > 0) return;
+    if (slot < 0 || slot > 4 || p.level < SKILL_UNLOCK[slot] || (p.cds[slot] ?? 0) > 0) return;
     const def = CLASSES[p.cls].skills[slot];
     if (def.aim === "passive") return;
     p.cds[slot] = p.nocd ? 0 : this.isRest ? 0.3 : skillCd(def.cd, p.stats, slot);
@@ -750,6 +761,28 @@ export class Game {
     p.gold -= price;
     this.giveCard(p, cardId);
     this.sendTo(id, { t: "gacha", card: cardId, tier, gold: p.gold });
+  }
+
+  /** v1.6 대장간: 암시장 근처에서 돈을 내고 카드 1장을 한 번 강화 */
+  handleForge(id: number, cardId: string) {
+    const p = this.players.get(id);
+    if (this.phase !== "rest" || this.stall !== "market" || !p || !this.market) return;
+    if (Math.hypot(p.x - this.market.x, p.y - this.market.y) > MARKET_RANGE + 8) return;
+    const c = CARD_BY_ID[cardId];
+    p.upgraded ??= [];
+    if (!c || !p.cards.includes(cardId) || p.upgraded.includes(cardId) || !canForge(cardId)) return;
+    const price = FORGE_PRICE[c.rarity as keyof typeof FORGE_PRICE];
+    if (p.gold < price) {
+      this.sendTo(id, { t: "toast", msg: "돈이 부족해요" });
+      return;
+    }
+    p.gold -= price;
+    const before = p.stats.maxHp;
+    c.apply(p.stats, this.noopCtx());
+    if (p.stats.maxHp > before) p.hp += p.stats.maxHp - before;
+    p.upgraded.push(cardId);
+    this.fx.push({ k: "awaken", x: Math.round(p.x), y: Math.round(p.y), r: 30 });
+    this.sendTo(id, { t: "forged", id: cardId, upgraded: [...p.upgraded], gold: p.gold });
   }
 
   handleRestReady(id: number, ready: boolean) {
@@ -1160,6 +1193,7 @@ export class Game {
           name: p.name, cls: p.cls, level: p.level, xp: Math.floor(p.xp), gold: p.gold,
           cards: [...p.cards],
           tal: { ...p.tal },
+          up: [...(p.upgraded ?? [])],
         })),
       });
       this.lastSaved = true;
@@ -1319,6 +1353,7 @@ export class Game {
     const n = p.cards.filter((id) => CARD_BY_ID[id]?.rarity !== "team").length;
     p.stats = this.levelStats(p);
     p.cards = [];
+    p.upgraded = [];
     for (const id of teamCards) {
       CARD_BY_ID[id].apply(p.stats, this.noopCtx());
       p.cards.push(id);
@@ -1383,7 +1418,11 @@ export class Game {
       if (!p.ghost) p.hp = Math.min(p.stats.maxHp, p.hp + 8 + p.stats.maxHp * 0.2);
       this.fx.push({ k: "lvl", x: p.x, y: p.y, r: p.level });
       const unlocked = SKILL_UNLOCK.indexOf(p.level);
-      if (unlocked > 0) {
+      if (unlocked === 4) {
+        // v1.6 각성!
+        this.sendTo(p.id, { t: "title", name: "각성!", desc: `5번 스킬 「${CLASSES[p.cls].skills[4].name.replace("각성: ", "")}」 해금`, color: "#ffd040" });
+        this.fx.push({ k: "awaken", x: Math.round(p.x), y: Math.round(p.y), r: 50 });
+      } else if (unlocked > 0) {
         this.sendTo(p.id, { t: "toast", msg: `레벨 ${p.level}! ${unlocked + 1}번 스킬 「${CLASSES[p.cls].skills[unlocked].name}」 해금` });
       }
     }
@@ -1956,7 +1995,7 @@ export class Game {
         break;
       case "nocd":
         p.nocd = !p.nocd;
-        p.cds = [0, 0, 0, 0];
+        p.cds = [0, 0, 0, 0, 0];
         this.sendTo(id, { t: "toast", msg: p.nocd ? "쿨타임 없음 켜짐" : "쿨타임 없음 꺼짐" });
         break;
       case "heal":
@@ -2029,7 +2068,7 @@ export class Game {
       case "class":
         if (!(cmd.cls in CLASSES)) return;
         p.cls = cmd.cls as ClassId;
-        p.cds = [0, 0, 0, 0];
+        p.cds = [0, 0, 0, 0, 0];
         this.pets = this.pets.filter((pt) => pt.ownerId !== p.id);
         p.stats = this.levelStats(p);
         for (const cid of p.cards) CARD_BY_ID[cid]?.apply(p.stats, this.noopCtx());
@@ -2275,7 +2314,7 @@ export class Game {
   private updatePlayer(p: Player) {
     const def = CLASSES[p.cls];
     p.atkCd -= DT;
-    for (let i = 0; i < 4; i++) p.cds[i] = Math.max(0, p.cds[i] - DT);
+    for (let i = 0; i < p.cds.length; i++) p.cds[i] = Math.max(0, p.cds[i] - DT);
     p.invulnT -= DT;
     if (p.fallCd) p.fallCd = Math.max(0, p.fallCd - DT);
     if (p.robotT) p.robotT = Math.max(0, p.robotT - DT);
@@ -2284,6 +2323,7 @@ export class Game {
     if (p.songFastT) p.songFastT = Math.max(0, p.songFastT - DT);
     if (p.ghost && this.phase === "play") p.ghostTime = (p.ghostTime ?? 0) + DT;
     if (p.comboT) { p.comboT = Math.max(0, p.comboT - DT); if (!p.comboT) p.combo = 0; }
+    this.updateAwaken(p);
     if (!p.ghost && this.phase === "play") this.updateCardFx(p);
     if (p.regenT) {
       // 성직자 특성 '은총': 초당 체력 5% 회복
@@ -3144,6 +3184,43 @@ export class Game {
     }
   }
 
+  /** v1.6 각성기 지속 효과: 성역 · 만한전석 · 별빛 화살비 */
+  private updateAwaken(p: Player) {
+    if (p.sanctT) p.sanctT = Math.max(0, p.sanctT - DT);
+    if (p.sanctBuffT) p.sanctBuffT = Math.max(0, p.sanctBuffT - DT);
+    if (p.banquetT) p.banquetT = Math.max(0, p.banquetT - DT);
+    if (p.ghost) return;
+    if ((p.sanctT ?? 0) > 0 || (p.banquetT ?? 0) > 0) {
+      const sanct = (p.sanctT ?? 0) > 0;
+      const r = sanct ? 90 : 85;
+      for (const q of this.players.values()) {
+        if (q.ghost || Math.hypot(q.x - p.x, q.y - p.y) > r) continue;
+        if (sanct) {
+          q.sanctBuffT = 0.3;
+          q.hp = Math.min(q.stats.maxHp, q.hp + q.stats.maxHp * 0.03 * DT);
+        } else {
+          q.spicyT = Math.max(q.spicyT, 0.3);
+          q.hp = Math.min(q.stats.maxHp, q.hp + q.stats.maxHp * 0.05 * DT);
+        }
+      }
+    }
+    if (p.volleyT && p.volleyT > 0) {
+      p.volleyT -= DT;
+      p.volleyTick = (p.volleyTick ?? 0) - DT;
+      if (p.volleyTick <= 0) {
+        p.volleyTick = 0.3;
+        const near = this.nearMonsters(p.x, p.y, 180, this.nearBuf)
+          .filter((m) => m.spawnT <= 0 && m.kind !== "chest" && m.kind !== "pvp" && m.hp > 0 && Math.hypot(m.x - p.x, m.y - p.y) < 180)
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3);
+        for (const m of near) {
+          const pr = this.fireProj(p, "arrow", Math.atan2(m.y - p.y, m.x - p.x), 320, 0.8, 10, { skill: true });
+          pr.pierce = 0;
+        }
+      }
+    }
+  }
+
   /** v1.4 카드 효과: 회전 칼날 · 유성 소환 */
   private updateCardFx(p: Player) {
     if (p.stats.relicZap) {
@@ -3690,7 +3767,7 @@ export class Game {
     }
 
     for (const p of this.players.values()) {
-      if (p.stats.cdOnKill && m.dmgBy.has(p.id)) for (let i = 0; i < 4; i++) p.cds[i] = Math.max(0, p.cds[i] - p.stats.cdOnKill);
+      if (p.stats.cdOnKill && m.dmgBy.has(p.id)) for (let i = 0; i < p.cds.length; i++) p.cds[i] = Math.max(0, p.cds[i] - p.stats.cdOnKill);
       // 도감: 이 몬스터에게 피해를 준 사람 모두 처치 기록
       if (!this.cmdUsed && m.dmgBy.has(p.id) && m.kind !== "chest") {
         codexKill(p.name, m.kind);
@@ -3741,6 +3818,8 @@ export class Game {
     if (p.dashT > 0 && (!p.charging || p.lethalDash)) return false;
     if (!ignoreInvuln && p.invulnT > 0) return false;
     let mul = p.stats.dmgTakenMul * (p.tauntT > 0 ? 0.5 : 1) * (p.giantT > 0 ? 0.5 : 1) * (p.feastT > 0 ? 0.7 : 1);
+    // 성직자 각성 '성역': 받는 피해 -40%
+    if ((p.sanctBuffT ?? 0) > 0) mul *= 0.6;
     // 검사 특성 '수호의 거인': 거인화한 검사 주변 동료 받는 피해 -30%
     for (const q of this.players.values()) {
       if (q !== p && q.giantT > 0 && !q.ghost && tier(q.tal, "w_guard") >= 5 && Math.hypot(q.x - p.x, q.y - p.y) < 90) { mul *= 0.7; break; }
@@ -3847,7 +3926,7 @@ export class Game {
           lv: p.level, xp: Math.floor(p.xp), xpn: xpToNext(p.level), gold: p.gold,
           shield: Math.ceil(p.shield), giant: p.giantT > 0,
           size: Math.round(p.stats.sizeMul * (p.giantT > 0 ? 2 : 1) * 100) / 100,
-          rev: this.reversed(p), shake: !!p.stats.aimShake, ps, god: p.god || undefined, song: p.songOn || undefined, ob: p.stats.orbit || undefined, cb: (p.combo ?? 0) >= 3 ? p.combo : undefined, off: p.dc || undefined, spec: p.spec || undefined,
+          rev: this.reversed(p), shake: !!p.stats.aimShake, ps, god: p.god || undefined, song: p.songOn || undefined, aw: p.level >= SKILL_UNLOCK[4] || undefined, sa: (p.sanctT ?? 0) > 0 ? 1 : (p.banquetT ?? 0) > 0 ? 2 : undefined, ob: p.stats.orbit || undefined, cb: (p.combo ?? 0) >= 3 ? p.combo : undefined, off: p.dc || undefined, spec: p.spec || undefined,
           cos: this.changed(this.sentCos, p.id, JSON.stringify(p.cos ?? {}), full) ? (p.cos ?? {}) : undefined,
           cards: this.changed(this.sentCards, p.id, p.cards.join(","), full) ? p.cards : undefined,
         };

@@ -44,7 +44,7 @@ function run(cls: ClassId, level: number, mode: "old" | "new", tal: Record<strin
       if (!target) break;
       p.input = { up: false, down: false, left: false, right: false, ax: target.x, ay: target.y, atk: true, dashSeq: 0 };
       // 닌자 천벌은 즉사라 측정에서 뺌
-      for (let s = 0; s < 4; s++) if (p.cds[s] <= 0 && !(cls === "ninja" && s === 3)) g.handleCast(1, s, target.x, target.y);
+      for (let s = 0; s < (process.env.AW === "0" ? 4 : 5); s++) if (p.cds[s] <= 0 && !(cls === "ninja" && s === 3)) g.handleCast(1, s, target.x, target.y);
       G.phase = "play";
       g.tick();
       for (const m of g.monsters) m.hp = Math.max(m.hp, 1e8);

@@ -19,6 +19,8 @@ export interface SavedPlayer {
   cards: string[];
   /** v1.0 특성 트리 */
   tal?: Record<string, number>;
+  /** v1.6 대장간 강화 카드 */
+  up?: string[];
 }
 
 export interface SaveData {
@@ -56,16 +58,16 @@ interface StoreData {
 const emptyRecords = (): Records => ({ total: [], worlds: {}, descent: [], panic: [] });
 
 let data: StoreData = { saves: [], clears: [], records: {}, codex: {}, profiles: {} };
-try {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const raw = JSON.parse(fs.readFileSync(FILE, "utf8")) as any;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalize(raw: any): StoreData {
   const records: Leaderboards = {};
   for (const [k, v] of Object.entries(raw.records ?? {})) {
     // 예전 형식(normal = 지금의 쉬움)을 옮겨 옴. 예전 하드코어(×1.7)는 기준이 달라 버림
     if (k === "normal") records["1"] = v as Records;
     else if (/^[1-4]$/.test(k)) records[k] = v as Records;
   }
-  data = {
+  return {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     saves: (raw.saves ?? []).map((s: any) => ({ ...s, diff: s.diff ?? (s.hardcore ? 4 : 1) })),
     clears: raw.clears ?? [],
@@ -73,18 +75,75 @@ try {
     codex: raw.codex ?? {},
     profiles: raw.profiles ?? {},
   };
+}
+
+try {
+  data = normalize(JSON.parse(fs.readFileSync(FILE, "utf8")));
 } catch {
   // 첫 실행이면 파일이 없음
 }
 
+// ---------- v1.6 기록 영구 저장 (Upstash Redis, 무료) ----------
+// Render 무료 서버는 재시작·업데이트 때 파일이 지워지므로, 환경변수가 있으면 클라우드에도 저장
+const CLOUD_URL = process.env.UPSTASH_REDIS_REST_URL?.replace(/\/$/, "");
+const CLOUD_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const CLOUD_KEY = process.env.STORE_KEY ?? "yangbaechu-store";
+export const cloudOn = !!(CLOUD_URL && CLOUD_TOKEN);
+
+/** 서버 시작 때 클라우드에서 기록을 불러옴 (없으면 파일 그대로) */
+export async function initStore() {
+  if (!cloudOn) return;
+  try {
+    const r = await fetch(`${CLOUD_URL}/get/${CLOUD_KEY}`, { headers: { Authorization: `Bearer ${CLOUD_TOKEN}` } });
+    const j = (await r.json()) as { result?: string | null };
+    if (j.result) {
+      data = normalize(JSON.parse(j.result));
+      console.log("클라우드에서 기록을 불러왔어요");
+    } else {
+      console.log("클라우드에 기록이 아직 없어요 (처음 시작)");
+    }
+  } catch (e) {
+    console.log("클라우드 기록 불러오기 실패, 파일 기록으로 시작:", (e as Error).message);
+  }
+}
+
+let cloudTimer: NodeJS.Timeout | null = null;
+async function pushCloud() {
+  if (!cloudOn) return;
+  try {
+    await fetch(`${CLOUD_URL}/set/${CLOUD_KEY}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${CLOUD_TOKEN}` },
+      body: JSON.stringify(data),
+    });
+  } catch (e) {
+    console.log("클라우드 저장 실패 (다음에 다시 시도):", (e as Error).message);
+  }
+}
+
+/** 종료 직전(업데이트·재시작) 바로 저장 */
+export async function flushStore() {
+  if (cloudTimer) { clearTimeout(cloudTimer); cloudTimer = null; }
+  await pushCloud();
+}
+
 let writeTimer: NodeJS.Timeout | null = null;
 function persist() {
-  if (writeTimer) return;
-  writeTimer = setTimeout(() => {
-    writeTimer = null;
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(data, null, 1));
-  }, 200);
+  if (!writeTimer) {
+    writeTimer = setTimeout(() => {
+      writeTimer = null;
+      try {
+        fs.mkdirSync(path.dirname(FILE), { recursive: true });
+        fs.writeFileSync(FILE, JSON.stringify(data, null, 1));
+      } catch {
+        // 파일을 못 써도 클라우드엔 저장
+      }
+    }, 200);
+  }
+  // 클라우드는 20초에 한 번만 (무료 사용량 아끼기)
+  if (cloudOn && !cloudTimer) {
+    cloudTimer = setTimeout(() => { cloudTimer = null; void pushCloud(); }, 20_000);
+  }
 }
 
 const norm = (n: string) => n.trim().toLowerCase();
