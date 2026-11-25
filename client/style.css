@@ -412,6 +412,19 @@ body.touch .hud-help, body.touch .skill-bar { display: none; }
 /* ---------- 휴게소 / 암시장 ---------- */
 .rest-bar { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; pointer-events: auto; white-space: nowrap; }
 .market-panel { width: min(620px, 100%); }
+/* v1.8 떠도는 상인 */
+.merchant-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
+.trade { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 2px solid #6a5030; background: linear-gradient(180deg, #2a2018, #1a1410); border-radius: 6px; text-align: left; color: inherit; font: inherit; cursor: pointer; min-height: 88px; }
+.trade:hover:not(:disabled) { border-color: #e0b060; transform: translateY(-1px); }
+.trade:disabled { opacity: 0.45; cursor: default; }
+.trade b { color: #ffd080; font-size: 15px; }
+.trade .give { color: #ff8a8a; font-size: 12px; }
+.trade .get { color: #8af0a0; font-size: 12px; }
+.trade.done { border-color: #50d070; }
+@media (max-width: 640px) {
+  .merchant-list { grid-template-columns: 1fr; }
+  .trade { min-height: 64px; padding: 12px; }
+}
 .market-head { display: flex; justify-content: space-between; align-items: center; }
 .market-head h2 { margin: 0; font-weight: normal; color: var(--curse); }
 .market-head .gold { font-size: 18px; }

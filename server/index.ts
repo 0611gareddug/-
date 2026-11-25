@@ -479,6 +479,9 @@ wss.on("connection", (ws) => {
         game?.handleChest(me.id);
         game?.handleAltar(me.id);
         break;
+      case "trade":
+        game?.handleTrade(me.id, Number(msg.idx));
+        break;
       case "gamble":
         game?.handleGamble(me.id, msg.game, Number(msg.bet), msg.pick === "even" ? "even" : "odd");
         break;

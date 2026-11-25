@@ -5,7 +5,7 @@ import Phaser from "phaser";
 import { CLASSES, CLASS_IDS, MANA_MAX, MANA_PER_MINION, MINION_MAX, SKILL_UNLOCK, type ClassId } from "../shared/classes";
 import { CARD_BY_ID, FORGE_PRICE, GACHA_PRICE, RARITY_NAME, canForge } from "../shared/cards";
 import { MARKET_RANGE, PLAYER_COLORS, ROUNDS_PER_WORLD, VIEW_H, VIEW_W } from "../shared/constants";
-import { type SnapMonster, type SnapProj, type SnapshotWire, GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
+import { type SnapMonster, type SnapProj, type SnapshotWire, TRADES, TRADE_MAX, GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
 import { DIFFS, MONSTERS, WORLDS, WORLD_COUNT, diffDmgMul, diffHpMul, diffName } from "../shared/worlds";
 import { initMenu, isCapturingKey, isMenuOpen, mySkin, onCodex, onProfile, setAdmin, toggleMenu } from "./menu";
 import { ACH_BY_ID, titleName } from "../shared/achievements";
@@ -23,9 +23,9 @@ import { initTouch } from "./touch";
 import { TALENTS, TALENT_TIERS, tier } from "../shared/talents";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const screens = ["title", "lobby", "hud", "cards", "vote", "market", "gamble", "trial", "result"] as const;
+const screens = ["title", "lobby", "hud", "cards", "vote", "market", "gamble", "merchant", "trial", "result"] as const;
 type ScreenId = (typeof screens)[number];
-const BLOCKING: ScreenId[] = ["cards", "vote", "market", "gamble", "trial", "result"];
+const BLOCKING: ScreenId[] = ["cards", "vote", "market", "gamble", "merchant", "trial", "result"];
 function show(...ids: ScreenId[]) {
   for (const s of screens) $(s).classList.toggle("hidden", !ids.includes(s));
   // 모바일 조작 버튼은 게임 화면(HUD)일 때만
@@ -517,11 +517,16 @@ function updateHud(s: Snapshot) {
     else if (stage?.kind === "treasure" && chestBusted) text = "미믹에게 당했어요... 출구로 가세요";
     else if (stage?.kind === "treasure" && (scene?.nearChest(chestOpened) ?? Infinity) <= 26) text = `${displayKey(settings.keys.market)} 를 눌러 상자 열기 (미믹 조심!)`;
     else if (stage?.kind === "altar" && (scene?.nearAltar() ?? Infinity) <= 30) text = `${displayKey(settings.keys.market)} 를 눌러 제단에 피를 바치기 (체력 30% → 전설 카드, 한 번만)`;
+    else if (stage?.kind === "merchant" && (scene?.nearMerchant() ?? Infinity) <= 40) text = `${displayKey(settings.keys.market)} 를 눌러 상인과 거래하기`;
+    else if (stage?.kind === "collapse") text = "빨갛게 금 간 바닥은 곧 무너져요! 계속 움직여요";
+    else if (stage?.kind === "puzzle") text = (s.plates ?? []).some((q) => q[3] > 0) ? "번호 순서대로 발판을 밟아요 (틀리면 처음부터)" : "모두 하나씩 맡아서 발판을 동시에 밟아요!";
     else if (s.portal && stage?.kind !== "rest") text = "포탈이 열렸어요! 살아있는 모두가 포탈에 모이면 출발해요.";
     msg.textContent = text;
     msg.classList.toggle("hidden", !text);
 
     if (visible("market") && !nearMarket()) closeMarket();
+    if (visible("merchant") && ((scene?.nearMerchant() ?? Infinity) > 44 || stage?.kind !== "merchant")) closeMarket();
+    if (visible("merchant")) $("merchant-gold").textContent = `${me.gold}원`;
   }
 
   // 보석 쟁탈전 점수판
@@ -562,6 +567,12 @@ function updateHud(s: Snapshot) {
     ? `<span class="gold">황금 슬라임을 잡아라! 남은 시간 ${s.eventT ?? 0}초</span>`
     : stage?.kind === "altar"
     ? `<span style="color:#c060f0">남은 시간 ${s.eventT ?? 0}초</span> <span class="muted">출구에 모두 모이면 출발</span>`
+    : stage?.kind === "merchant"
+    ? `<span style="color:#e0b060">남은 시간 ${s.eventT ?? 0}초</span> <span class="muted">출구에 모두 모이면 출발</span>`
+    : stage?.kind === "collapse"
+    ? `<span style="color:#f0a040">버티세요! 남은 시간 ${s.eventT ?? 0}초</span>`
+    : stage?.kind === "puzzle"
+    ? `<span style="color:#60d0f0">발판 ${s.puzR ?? 0} / ${s.puzN ?? 3} · 남은 시간 ${s.eventT ?? 0}초</span>`
     : stage?.kind === "treasure"
     ? `<span class="gold">상자 ${chestOpened.size}/4 · 남은 시간 ${s.treasureT ?? 0}초</span> <span class="muted">출구에 모두 모이면 출발</span>`
     : stage?.kind === "trial"
@@ -824,6 +835,33 @@ function closeMarket() {
   show("hud");
 }
 $("btn-market-close").onclick = closeMarket;
+$("btn-merchant-close").onclick = closeMarket;
+
+// ---------- v1.8 떠도는 상인 ----------
+let tradesUsed: string[] = [];
+function openMerchant() {
+  $("merchant-result").innerHTML = "";
+  renderMerchant();
+  show("hud", "merchant");
+}
+function renderMerchant() {
+  $("merchant-gold").textContent = `${myGold()}원`;
+  $("merchant-left").textContent = String(Math.max(0, TRADE_MAX - tradesUsed.length));
+  const list = $("merchant-list");
+  list.innerHTML = "";
+  const prices = stage?.merchant?.prices ?? [0, 150, 60, 80];
+  TRADES.forEach((tr, i) => {
+    const b = document.createElement("button");
+    const done = tradesUsed.includes(tr.id);
+    b.className = "trade" + (done ? " done" : "");
+    b.disabled = done || tradesUsed.length >= TRADE_MAX;
+    const give = tr.id === "gold" || tr.id === "study" ? `돈 ${prices[i]}원` : tr.give;
+    const get = tr.id === "junk" ? `돈 ${prices[i]}원` : tr.get;
+    b.innerHTML = `<b>${tr.name}${done ? " ✓" : ""}</b><span class="give">내놓기: ${give}</span><span class="get">받기: ${get}</span>`;
+    b.onclick = () => net.send({ t: "trade", idx: i });
+    list.append(b);
+  });
+}
 $("btn-gamble-close").onclick = closeMarket;
 
 // ---------- 도박꾼 ----------
@@ -881,7 +919,8 @@ $("btn-rest-ready").onclick = () => setRestReady(!restReady);
 
 /** E: 가판대 열기·닫기 / 보물 상자 / 제단 (키보드·모바일 버튼 공용) */
 function interact() {
-  if (visible("market") || visible("gamble")) closeMarket();
+  if (visible("market") || visible("gamble") || visible("merchant")) closeMarket();
+  else if (stage?.kind === "merchant" && (scene?.nearMerchant() ?? Infinity) <= 40) openMerchant();
   else if (stage?.kind === "rest" && nearMarket() && !visible("cards") && !visible("vote")) openMarket();
   else if (stage?.kind === "treasure" && !chestBusted) net.send({ t: "chest" });
   else if (stage?.kind === "altar") net.send({ t: "chest" });
@@ -1384,6 +1423,9 @@ function stageLabel(st: StageInfo) {
   if (st.kind === "treasure") return `${st.world}-${st.round} 보물방`;
   if (st.kind === "goldrush") return `${st.world}-${st.round} <span class="gold">황금 러시</span>`;
   if (st.kind === "altar") return `${st.world}-${st.round} <span style="color:#c060f0">저주받은 제단</span>`;
+  if (st.kind === "collapse") return `${st.world}-${st.round} <span style="color:#f0a040">미니 게임: 무너지는 바닥</span>`;
+  if (st.kind === "puzzle") return `${st.world}-${st.round} <span style="color:#60d0f0">미니 게임: 협동 발판</span>`;
+  if (st.kind === "merchant") return `${st.world}-${st.round} <span style="color:#e0b060">떠도는 상인</span>`;
   if (st.kind === "rest") return `휴게소 · ${st.stall === "gambler" ? "도박꾼" : "암시장"} <span class="muted">(월드 ${st.world})</span>`;
   if (st.kind === "boss") return `${st.world}-보스 ${st.name}`;
   return `${st.world}-${st.round} ${st.name} <span class="muted">(${st.round}/${ROUNDS_PER_WORLD})</span>`;
@@ -1450,12 +1492,13 @@ net.onMessage = async (m: ServerMsg) => {
       const st = m.stage;
       bgm.play(st.zone !== undefined && st.kind !== "rest" ? "panic"
         : st.kind === "rest" ? "rest"
-        : st.kind === "treasure" || st.kind === "goldrush" || st.kind === "altar" ? "treasure"
+        : st.kind === "treasure" || st.kind === "goldrush" || st.kind === "altar" || st.kind === "collapse" || st.kind === "puzzle" || st.kind === "merchant" ? "treasure"
         : st.kind === "boss" || st.kind === "trial" || st.kind === "arena" ? "boss"
         : `w${st.world}`);
       if (st.kind === "boss") sfx.bossRoar();
       chestOpened = new Set();
       chestBusted = false;
+      tradesUsed = [];
       if (st.kind !== "rest") showRelics(null);
       show("hud");
       panicStage(m.stage);
@@ -1573,6 +1616,13 @@ net.onMessage = async (m: ServerMsg) => {
         $("market-gold").textContent = `${m.gold}원`;
         renderForge(m.gold);
       }
+      break;
+    case "tradeResult":
+      tradesUsed = m.used;
+      if (m.ok) { sfx.fanfare(); toast(m.msg); } else toast(m.msg);
+      $("merchant-result").innerHTML = `<span style="color:${m.ok ? "#8af0a0" : "#ff8a8a"}">${escapeHtml(m.msg)}</span>`;
+      if (m.card) $("merchant-result").prepend(cardIcon(m.card, 28));
+      if (visible("merchant")) renderMerchant();
       break;
     case "altarResult":
       sfx.fanfare();

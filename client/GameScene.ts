@@ -61,6 +61,20 @@ export class GameScene extends Phaser.Scene {
   /** DOM 창(상점 등)이 열려 있으면 게임 입력을 막음 */
   uiOpen = false;
   private altarGfx: Phaser.GameObjects.Graphics | null = null;
+  /** v1.8 떠도는 상인 · 미니 게임(무너지는 바닥 · 협동 발판) */
+  private merchantGfx: Phaser.GameObjects.Graphics | null = null;
+  private merchantTimer: Phaser.Time.TimerEvent | null = null;
+  private miniG: Phaser.GameObjects.Graphics | null = null;
+  private holeImgs = new Map<number, Phaser.GameObjects.Image>();
+  private plateTxt: Phaser.GameObjects.Text[] = [];
+  private prevPuzR = 0;
+
+  /** 상인까지 거리 (없으면 무한) */
+  nearMerchant() {
+    const a = this.stage?.merchant;
+    if (!a) return Infinity;
+    return Math.hypot(this.local.x - a.x, this.local.y - a.y);
+  }
   private altarTimer: Phaser.Time.TimerEvent | null = null;
 
   /** 제단까지 거리 (없으면 무한) */
@@ -460,6 +474,58 @@ export class GameScene extends Phaser.Scene {
       return img;
     });
 
+    // v1.8 떠도는 상인 · 미니 게임 정리
+    this.merchantGfx?.destroy();
+    this.merchantGfx = null;
+    this.merchantTimer?.remove();
+    this.merchantTimer = null;
+    this.miniG?.destroy();
+    this.miniG = null;
+    for (const im of this.holeImgs.values()) im.destroy();
+    this.holeImgs.clear();
+    for (const t of this.plateTxt) t.destroy();
+    this.plateTxt = [];
+    this.prevPuzR = 0;
+    if (st.kind === "collapse" || st.kind === "puzzle") {
+      this.miniG = this.add.graphics().setDepth(1);
+      if (!this.textures.exists("hole_tile")) this.textures.addCanvas("hole_tile", specialTile("v", 7));
+    }
+    if (st.merchant) {
+      const a = st.merchant;
+      const g = this.add.graphics().setDepth(a.y + 6);
+      this.merchantGfx = g;
+      const draw = (t: number) => {
+        g.clear();
+        const bob = Math.round(Math.sin(t / 400) * 1);
+        // 거래 범위 + 깔개
+        g.lineStyle(1, 0xe0b060, 0.45).strokeCircle(a.x, a.y + 6, 40);
+        g.fillStyle(0x8a3a2a, 1).fillEllipse(a.x, a.y + 10, 46, 14);
+        g.fillStyle(0xc05a3a, 1).fillEllipse(a.x, a.y + 10, 40, 10);
+        g.fillStyle(0xf0c060, 1).fillRect(a.x - 14, a.y + 9, 4, 1).fillRect(a.x + 10, a.y + 9, 4, 1);
+        // 큰 봇짐
+        g.fillStyle(0x6a4a28, 1).fillRect(a.x + 4, a.y - 12 + bob, 12, 14);
+        g.fillStyle(0x8a6a3a, 1).fillRect(a.x + 5, a.y - 11 + bob, 10, 4);
+        // 망토 입은 상인
+        g.fillStyle(0x4a3a5a, 1).fillRect(a.x - 7, a.y - 8 + bob, 12, 14);
+        g.fillStyle(0x5e4a70, 1).fillRect(a.x - 6, a.y - 7 + bob, 4, 12);
+        g.fillStyle(0xf2c79a, 1).fillRect(a.x - 5, a.y - 15 + bob, 8, 7);
+        g.fillStyle(0x141218, 1).fillRect(a.x - 3, a.y - 12 + bob, 1, 1).fillRect(a.x + 1, a.y - 12 + bob, 1, 1);
+        // 뾰족 모자
+        g.fillStyle(0x2a2238, 1).fillRect(a.x - 7, a.y - 17 + bob, 12, 3).fillRect(a.x - 4, a.y - 21 + bob, 6, 4).fillRect(a.x - 2, a.y - 24 + bob, 3, 3);
+        g.fillStyle(0xe0b060, 1).fillRect(a.x - 7, a.y - 15 + bob, 12, 1);
+        // 흔들리는 등불
+        const sw = Math.sin(t / 350) * 3;
+        g.lineStyle(1, 0x3a2a1a, 1).lineBetween(a.x - 10, a.y - 6 + bob, a.x - 12 + sw, a.y + 1);
+        const glow = 0.6 + 0.4 * Math.sin(t / 180);
+        g.fillStyle(0xffd060, 0.25 * glow).fillCircle(a.x - 12 + sw, a.y + 3, 7);
+        g.fillStyle(0xffe090, 1).fillRect(a.x - 14 + sw, a.y + 1, 4, 4);
+        // 동전 반짝
+        if (Math.floor(t / 500) % 3 === 0) g.fillStyle(0xfff4b0, 1).fillRect(a.x + 14, a.y - 16 + bob, 2, 2);
+      };
+      draw(0);
+      this.merchantTimer = this.time.addEvent({ delay: 60, loop: true, callback: () => draw(this.time.now) });
+    }
+
     // v1.5 저주받은 제단: 보랏빛으로 맥동하는 원 + 제단 돌
     this.altarGfx?.destroy();
     this.altarGfx = null;
@@ -560,6 +626,46 @@ export class GameScene extends Phaser.Scene {
       }
       this.clockG = this.add.graphics().setScrollFactor(0).setDepth(200002);
       this.clockTxt = this.add.text(VIEW_W / 2, 50, "", { ...TEXT_STYLE, fontSize: "8px", align: "center" }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(200002);
+    }
+  }
+
+  /** v1.8 미니 게임: 금 간 타일(깜빡임) · 무너진 구멍 · 협동 발판 */
+  private updateMini(s: Snapshot) {
+    const g = this.miniG;
+    if (!g || !this.stage) return;
+    g.clear();
+    const now = performance.now();
+    const w = this.stage.w;
+    for (const idx of s.holes ?? []) {
+      if (this.holeImgs.has(idx)) continue;
+      const x = (idx % w) * TILE, y = Math.floor(idx / w) * TILE;
+      const im = this.add.image(x, y, "hole_tile").setOrigin(0).setDepth(0.5);
+      this.holeImgs.set(idx, im);
+      this.pixelBurst(x + TILE / 2, y + TILE / 2, 6, [0x8a7a60, 0x5a4a3a], 14, 400);
+    }
+    const blink = Math.floor(now / 120) % 2 === 0;
+    for (const idx of s.crack ?? []) {
+      const x = (idx % w) * TILE, y = Math.floor(idx / w) * TILE;
+      g.fillStyle(0xe03020, blink ? 0.45 : 0.2).fillRect(x, y, TILE, TILE);
+      g.lineStyle(1, 0x1a0a08, 0.9).lineBetween(x + 3, y + 2, x + 8, y + 8).lineBetween(x + 8, y + 8, x + 6, y + 14).lineBetween(x + 8, y + 8, x + 13, y + 10);
+    }
+    const plates = s.plates ?? [];
+    while (this.plateTxt.length < plates.length) {
+      this.plateTxt.push(this.add.text(0, 0, "", { ...TEXT_STYLE, fontSize: "8px" }).setOrigin(0.5).setDepth(2));
+    }
+    this.plateTxt.forEach((t, i) => t.setVisible(i < plates.length));
+    plates.forEach(([x, y, lit, order], i) => {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 200 + i);
+      g.fillStyle(0x000000, 0.35).fillEllipse(x, y + 2, 26, 12);
+      g.fillStyle(lit ? 0x40c070 : 0x3a4a6a, 1).fillEllipse(x, y, 24, 11);
+      g.fillStyle(lit ? 0x90ffb0 : 0x60d0f0, lit ? 0.9 : 0.35 + 0.35 * pulse).fillEllipse(x, y - 1, 18, 7);
+      g.lineStyle(1, lit ? 0xd0ffd8 : 0x9ce8ff, 0.9).strokeEllipse(x, y, 24, 11);
+      const t = this.plateTxt[i];
+      t.setPosition(x, y - 1).setText(order > 0 ? String(order) : lit ? "✓" : "").setColor(lit ? "#0a3a18" : "#ffffff");
+    });
+    if ((s.puzR ?? 0) > this.prevPuzR) {
+      this.prevPuzR = s.puzR ?? 0;
+      sfx.fanfare();
     }
   }
 
@@ -903,6 +1009,7 @@ export class GameScene extends Phaser.Scene {
     this.renderWorld(dt);
     this.drawAim(meSnap, world.x, world.y);
     this.updateGimmick(dt, latest);
+    this.updateMini(latest);
   }
 
   /** 스킬 키를 누르고 있는 동안 사거리·범위 표시 */

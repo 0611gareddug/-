@@ -98,7 +98,9 @@ export type ClientMsg =
   /** 게임에서 혼자 빠져 로비로 (개발자 도구 감지 시) */
   | { t: "leaveGame" }
   /** 보물방: 가까운 상자 열기 */
-  | { t: "chest" };
+  | { t: "chest" }
+  /** v1.8 떠도는 상인과 교환 (TRADES 번호) */
+  | { t: "trade"; idx: number };
 
 // ---------- 서버 → 클라이언트 ----------
 export interface LobbyPlayer {
@@ -279,6 +281,13 @@ export interface Snapshot {
   storm?: number;
   /** v1.8 시계탑 시간 왜곡: 1 빠름 · -1 느림 · 2/-2 곧 빨라짐/느려짐 */
   warp?: number;
+  /** v1.8 무너지는 바닥: 금 간 타일 / 무너진 타일 (타일 번호) */
+  crack?: number[];
+  holes?: number[];
+  /** v1.8 협동 발판: [x, y, 밟힘(0/1), 순서(혼자일 때 1~, 아니면 0)] · 라운드 / 전체 라운드 */
+  plates?: [number, number, number, number][];
+  puzR?: number;
+  puzN?: number;
   /** 시련의 방 남은 시간 (초) */
   trialT?: number;
   /** 보물방 남은 시간 (초) */
@@ -316,7 +325,18 @@ export interface PanicSnap {
   done?: boolean;
 }
 
-export type StageKind = "battle" | "boss" | "rest" | "arena" | "trial" | "treasure" | "goldrush" | "altar";
+export type StageKind = "battle" | "boss" | "rest" | "arena" | "trial" | "treasure" | "goldrush" | "altar"
+  // v1.8 미니 게임(무너지는 바닥 · 협동 발판 퍼즐) · 떠도는 상인
+  | "collapse" | "puzzle" | "merchant";
+
+/** v1.8 떠도는 상인 교환 목록 (가격·보상은 월드 보상 배율 적용) */
+export const TRADES = [
+  { id: "blood", name: "피의 거래", give: "최대 체력 -15%", get: "희귀 카드 1장" },
+  { id: "gold", name: "큰손 거래", give: "돈 150원", get: "전설 카드 1장" },
+  { id: "junk", name: "고물 수집", give: "일반 카드 1장 (무작위)", get: "돈 60원" },
+  { id: "study", name: "과외 수업", give: "돈 80원", get: "레벨 +1" },
+] as const;
+export const TRADE_MAX = 2;
 
 export interface StageInfo {
   kind: StageKind;
@@ -330,6 +350,8 @@ export interface StageInfo {
   market?: { x: number; y: number };
   /** v1.5 저주받은 제단 위치 */
   altar?: { x: number; y: number };
+  /** v1.8 떠도는 상인 위치 · 교환별 금액 (TRADES 순서, 월드 배율 적용) */
+  merchant?: { x: number; y: number; prices: number[] };
   /** 휴게소 가판대 종류 */
   stall?: "market" | "gambler";
   /** 무한 하강: 층 / 변형 규칙 */
@@ -505,6 +527,8 @@ export type ServerMsg =
   | { t: "relics"; options: string[] | null }
   /** v1.5 저주받은 제단: 바쳤는지 */
   | { t: "altarResult"; card: string }
+  /** v1.8 떠도는 상인 교환 결과 (left: 남은 교환 횟수) */
+  | { t: "tradeResult"; ok: boolean; msg: string; card?: string; left: number; used: string[] }
   /** 보물방 상자 결과 (나에게만) — gold: 얻은 돈, mimic이면 lost: 잃은 돈 */
   | { t: "chestResult"; idx: number; mimic: boolean; gold: number; lost: number; total: number }
   /** PANIC 구역 돌파 (COMPLETE! 연출) */

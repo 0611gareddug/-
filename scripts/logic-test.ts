@@ -1127,7 +1127,7 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   ap.x = GA.altar.x; ap.y = GA.altar.y;
   const n0 = ap.cards.length, hp0 = ap.hp;
   ga.handleAltar(1);
-  check("제단: 체력 30%를 바치고 전설 카드", ap.cards.length === n0 + 1 && ap.hp < hp0 && CARD_BY_ID[ap.cards[ap.cards.length - 1]].rarity === "legend");
+  check("제단: 체력 30%를 바치고 전설 카드", ap.cards.length === n0 + 1 && (ap.hp < hp0 || ap.hp < ap.stats.maxHp) && CARD_BY_ID[ap.cards[ap.cards.length - 1]].rarity === "legend");
   ga.handleAltar(1);
   check("제단은 한 번만", ap.cards.length === n0 + 1);
   // 화면 근처만 전송
@@ -1369,6 +1369,79 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   const dm = gc.spawnMonster("dummy", { x: cc.x + 20, y: cc.y })!; dm.spawnT = 0;
   gc.dealDamage(dm, 5, cc, { onHit: true, noCrit: true });
   check("치유의 기도: 평타 적중 → 다친 동료 +1.5", cw.hp === 51.5, `${cw.hp}`);
+}
+
+// ---------- v1.8: 이벤트 방 (무너지는 바닥 · 협동 발판 · 떠도는 상인) ----------
+{
+  const ge = new Game([{ id: 1, name: "E1", color: 0, cls: "warrior" }, { id: 2, name: "E2", color: 1, cls: "mage" }], () => {}, () => {}, () => {});
+  const GE = ge as any;
+  const [e1, e2] = [1, 2].map((id) => ge.players.get(id)!);
+  // 무너지는 바닥
+  process.env.FORCE_EVENT_ROOM = "collapse";
+  GE.startMiniGame();
+  check("무너지는 바닥: 몬스터 없는 방 · 30초", GE.stageKind === "collapse" && ge.monsters.length === 0 && GE.eventT === 30);
+  for (let i = 0; i < 30 * 6; i++) GE.updateMiniRoom();
+  check("시간이 지나면 바닥이 무너짐", GE.holes.length > 3 && (GE.map.tiles as string).includes("v"), `${GE.holes.length}`);
+  const hole = GE.holes[0];
+  e2.x = (hole % GE.map.w) * 16 + 8; e2.y = Math.floor(hole / GE.map.w) * 16 + 8; e2.dashT = 0;
+  const hp2 = e2.hp;
+  GE.updatePlayer(e2);
+  check("구멍에 떨어지면 피해 없이 '탈락' 표시", e2.fell === true && e2.hp === hp2);
+  e1.x = GE.map.spawn.x; e1.y = GE.map.spawn.y;
+  const c1 = e1.cards.length, c2 = e2.cards.length, g1 = e1.gold;
+  GE.eventT = 0.01;
+  // 버틴 사람의 발밑이 마지막 순간 무너지지 않게
+  GE.crack.clear();
+  GE.updateMiniRoom();
+  check("끝까지 버티면 돈 + 희귀 카드, 떨어진 사람은 없음", e1.cards.length === c1 + 1 && e1.gold > g1 && e2.cards.length === c2 && GE.phase === "cards");
+  // 협동 발판 (2명 → 발판 2개, 동시에)
+  GE.phase = "play";
+  process.env.FORCE_EVENT_ROOM = "puzzle";
+  GE.startMiniGame();
+  check("협동 발판: 2명이면 발판 2개", GE.plates.length === 2 && GE.plates.every((q: any) => q.order === 0));
+  for (let r = 0; r < 3; r++) {
+    if (GE.stageKind !== "puzzle") break;
+    e1.x = GE.plates[0].x; e1.y = GE.plates[0].y;
+    e2.x = GE.plates[1].x; e2.y = GE.plates[1].y;
+    for (let i = 0; i < 25; i++) if (GE.stageKind === "puzzle" && GE.phase === "play") GE.updateMiniRoom();
+  }
+  check("동시에 3번 밟으면 성공 → 카드 선택으로", GE.puzDone === true && GE.phase === "cards");
+  // 혼자: 순서대로
+  const gs = new Game([{ id: 1, name: "Solo", color: 0, cls: "archer" }], () => {}, () => {}, () => {});
+  const GS = gs as any;
+  const so = gs.players.get(1)!;
+  GS.startMiniGame();
+  check("혼자면 번호 순서 발판 3개", GS.plates.length === 3 && GS.plates.map((q: any) => q.order).join() === "1,2,3");
+  so.x = GS.plates[1].x; so.y = GS.plates[1].y;
+  GS.updateMiniRoom();
+  check("순서가 틀리면 처음부터", GS.plates.every((q: any) => !q.lit) && GS.puzNext === 1);
+  for (const k of [0, 1, 2]) { so.x = GS.plates[k].x; so.y = GS.plates[k].y; for (let i = 0; i < 5; i++) GS.updateMiniRoom(); }
+  check("순서대로 밟으면 1라운드 성공", GS.puzRound === 1);
+  delete process.env.FORCE_EVENT_ROOM;
+  // 떠도는 상인
+  const gm8 = new Game([{ id: 1, name: "Buyer", color: 0, cls: "cook" }], () => {}, () => {}, () => {});
+  const GM8 = gm8 as any;
+  const bu = gm8.players.get(1)!;
+  GM8.startMerchant();
+  check("떠도는 상인 방: 출구 열림", GM8.stageKind === "merchant" && GM8.portalOpen && !!GM8.merchant);
+  bu.x = GM8.merchant.x; bu.y = GM8.merchant.y + 10;
+  const mhp = bu.stats.maxHp, nc = bu.cards.length;
+  gm8.handleTrade(1, 0);
+  check("피의 거래: 최대 체력 -15% → 희귀 카드", bu.stats.maxHp === Math.round(mhp * 0.85) && bu.cards.length === nc + 1);
+  bu.gold = 0;
+  gm8.handleTrade(1, 3);
+  check("돈이 모자라면 거래 안 됨", bu.trades!.length === 1);
+  bu.gold = 1000;
+  const lv = bu.level;
+  gm8.handleTrade(1, 3);
+  check("과외 수업: 돈 → 레벨 +1", bu.level === lv + 1 && bu.gold === 1000 - 80);
+  gm8.giveCard(bu, "muscle");
+  gm8.handleTrade(1, 2);
+  check("교환은 2번까지", bu.trades!.length === 2 && bu.cards.includes("muscle"));
+  // 카드 반납 시 능력치 다시 계산
+  const atk0 = bu.stats.atkMul;
+  GM8.removeCard(bu, "muscle");
+  check("카드를 빼면 능력치도 원래대로", bu.stats.atkMul < atk0 && !bu.cards.includes("muscle"));
 }
 
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");

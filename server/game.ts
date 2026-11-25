@@ -16,7 +16,7 @@ import {
   MONSTERS, WORLDS, WORLD_COUNT, diffDmgMul, diffHpMul, specialMonsters, worldDmgMul, worldHpMul, worldRewardMul,
   type BossAbility, type MonsterDef, type StatusEffect,
 } from "../shared/worlds";
-import { GEM_GOAL, PANIC_TIME, PANIC_ZONES } from "../shared/protocol";
+import { GEM_GOAL, PANIC_TIME, PANIC_ZONES, TRADES, TRADE_MAX } from "../shared/protocol";
 import { masteryGain } from "../shared/skins";
 import { TALENTS, TALENT_TIERS, talentPoints, tier } from "../shared/talents";
 import { generateMap, generateRestMap, generateTreasureMap, randomFloorPoint, type GenMap } from "./mapgen";
@@ -70,6 +70,9 @@ export interface Player extends Participant {
   relicZapT?: number;
   relicShieldT?: number;
   altarDone?: boolean;
+  /** v1.8 무너지는 바닥에서 떨어짐 (보상 없음) / 상인과 한 교환 */
+  fell?: boolean;
+  trades?: string[];
   /** v1.4 카드: 회전 칼날이 마지막으로 때린 시각 / 유성 소환 타이머 */
   orbitHit?: Map<number, number>;
   meteorT?: number;
@@ -415,6 +418,17 @@ export class Game {
   private eventT = 0;
   private eventWaveT = 0;
   private altar: { x: number; y: number } | null = null;
+  /** v1.8 미니 게임 · 상인 */
+  private merchant: { x: number; y: number } | null = null;
+  private crack = new Map<number, number>();
+  private holes: number[] = [];
+  private crackT = 0;
+  private floor0 = 0;
+  private plates: { x: number; y: number; lit: boolean; order: number }[] = [];
+  private puzRound = 0;
+  private puzHold = 0;
+  private puzNext = 0;
+  private puzDone = false;
   /** v1.4 보스 등장 컷씬 남은 시간 (이동·전투 멈춤) */
   private introT = 0;
   /** v1.0 특성 트리 사용 여부 */
@@ -957,6 +971,24 @@ export class Game {
       for (const p of this.players.values()) p.altarDone = false;
       this.eventT = 30;
       this.portalOpen = true;
+    } else if (kind === "collapse" || kind === "puzzle" || kind === "merchant") {
+      // v1.8 미니 게임 · 떠도는 상인: 몬스터 없는 작은 방
+      const tm = generateTreasureMap();
+      this.map = tm;
+      mapName = kind === "collapse" ? "무너지는 바닥" : kind === "puzzle" ? "협동 발판 퍼즐" : "떠도는 상인";
+      this.crack.clear();
+      this.holes = [];
+      this.crackT = 1.5;
+      this.floor0 = tm.tiles.split("").filter((c) => c !== "#").length;
+      this.plates = [];
+      this.puzRound = 0;
+      this.puzHold = 0;
+      this.puzNext = 0;
+      this.puzDone = false;
+      this.merchant = kind === "merchant" ? { x: (tm.w / 2) * 16, y: (tm.h / 2) * 16 - 8 } : null;
+      for (const p of this.players.values()) { p.fell = false; p.trades = []; }
+      this.eventT = kind === "collapse" ? 30 : kind === "puzzle" ? 40 : 30;
+      this.portalOpen = kind === "merchant";
     } else if (kind === "goldrush") {
       // v1.5 황금 러시: 25초 동안 황금 슬라임 떼
       this.map = generateMap(false, wd.special);
@@ -1050,6 +1082,7 @@ export class Game {
       stall: kind === "rest" ? stall : undefined,
       chests: kind === "treasure" ? this.chests : undefined,
       altar: kind === "altar" && this.altar ? this.altar : undefined,
+      merchant: kind === "merchant" && this.merchant ? { ...this.merchant, prices: [0, 150, 60, 80].map((v) => Math.round(v * worldRewardMul(this.powerWorld))) } : undefined,
       floor: this.descent ? this.floor : undefined,
       zone: this.panic ? this.zone : undefined,
       mission: this.panic ? this.mission : undefined,
@@ -1632,6 +1665,199 @@ export class Game {
   private startAltar() {
     this.title("저주받은 제단", "제단 앞에서 E — 체력 30%를 바치면 전설 카드 1장 (한 번만)", "#c060f0");
     this.startStage("altar");
+  }
+
+  // ---------- v1.8 미니 게임 · 떠도는 상인 ----------
+  private startMiniGame() {
+    const forced = process.env.FORCE_EVENT_ROOM;
+    const kind = forced === "collapse" || forced === "puzzle" ? forced : Math.random() < 0.5 ? "collapse" : "puzzle";
+    if (kind === "collapse") this.title("미니 게임: 무너지는 바닥", "30초 동안 떨어지지 말고 버티면 돈 + 희귀 카드! (떨어져도 죽진 않아요)", "#f0a040");
+    else this.title("미니 게임: 협동 발판 퍼즐", this.aliveCount() > 1 ? "빛나는 발판을 다 같이 동시에 밟아요! 3번 성공하면 보상" : "번호 순서대로 발판을 밟아요! 3번 성공하면 보상", "#60d0f0");
+    this.startStage(kind);
+    if (kind === "puzzle") this.newPuzzleRound();
+  }
+
+  private startMerchant() {
+    this.title("떠도는 상인", "상인 앞에서 E — 체력·돈·카드를 맞바꿔요 (2번까지)", "#e0b060");
+    this.startStage("merchant");
+  }
+
+  /** 상인과 교환 */
+  handleTrade(id: number, idx: number) {
+    const p = this.players.get(id);
+    const tr = TRADES[idx];
+    if (!p || !tr || p.ghost || this.phase !== "play" || this.stageKind !== "merchant" || !this.merchant) return;
+    const used = (p.trades ??= []);
+    const reply = (ok: boolean, msg: string, card?: string) =>
+      this.sendTo(p.id, { t: "tradeResult", ok, msg, card, left: TRADE_MAX - used.length, used: [...used] });
+    if (Math.hypot(p.x - this.merchant.x, p.y - this.merchant.y) > 40) return reply(false, "상인에게 더 가까이 가요");
+    if (used.length >= TRADE_MAX) return reply(false, "오늘 장사는 끝났어. (교환은 2번까지)");
+    if (used.includes(tr.id)) return reply(false, "같은 거래는 한 번만 해요");
+    const mul = worldRewardMul(this.powerWorld);
+    let card: string | undefined;
+    if (tr.id === "blood") {
+      card = this.randomCard(p, ["rare"]) ?? undefined;
+      if (!card) return reply(false, "줄 카드가 없네...");
+      p.stats.maxHp = Math.max(20, Math.round(p.stats.maxHp * 0.85));
+      p.hp = Math.min(p.hp, p.stats.maxHp);
+      this.giveCard(p, card);
+    } else if (tr.id === "gold") {
+      const price = Math.round(150 * mul);
+      if (p.gold < price) return reply(false, `돈이 모자라요 (${price}원 필요)`);
+      card = this.randomCard(p, ["legend"]) ?? undefined;
+      if (!card) return reply(false, "줄 카드가 없네...");
+      p.gold -= price;
+      this.giveCard(p, card);
+    } else if (tr.id === "junk") {
+      const commons = p.cards.filter((c) => CARD_BY_ID[c]?.rarity === "common");
+      if (!commons.length) return reply(false, "일반 카드가 없어요");
+      const gone = pick(commons);
+      this.removeCard(p, gone);
+      const pay = Math.round(60 * mul);
+      p.gold += pay;
+      this.checkRich(p);
+      used.push(tr.id);
+      this.fx.push({ k: "coin", x: Math.round(p.x), y: Math.round(p.y - 20), to: p.id, r: pay });
+      return reply(true, `「${CARD_BY_ID[gone].name}」을(를) 넘기고 ${pay}원을 받았어요`);
+    } else {
+      const price = Math.round(80 * mul);
+      if (p.gold < price) return reply(false, `돈이 모자라요 (${price}원 필요)`);
+      p.gold -= price;
+      this.addXp(p, xpToNext(p.level) - p.xp);
+    }
+    used.push(tr.id);
+    this.fx.push({ k: "lvl", x: Math.round(p.x), y: Math.round(p.y), r: p.level });
+    reply(true, card ? `「${CARD_BY_ID[card].name}」 획득!` : `레벨 ${p.level}!`, card);
+  }
+
+  /** 카드 1장을 빼고 능력치를 다시 계산 (대장간 강화분 포함) */
+  private removeCard(p: Player, id: string) {
+    const i = p.cards.lastIndexOf(id);
+    if (i < 0) return;
+    p.cards.splice(i, 1);
+    if (!p.cards.includes(id)) p.upgraded = (p.upgraded ?? []).filter((u) => u !== id);
+    const ratio = p.hp / p.stats.maxHp;
+    p.stats = this.levelStats(p);
+    for (const c of p.cards) CARD_BY_ID[c]?.apply(p.stats, this.noopCtx());
+    for (const c of p.upgraded ?? []) CARD_BY_ID[c]?.apply(p.stats, this.noopCtx());
+    p.hp = Math.max(1, Math.min(p.stats.maxHp, p.stats.maxHp * ratio));
+  }
+
+  /** 협동 발판: 새 라운드 발판 배치 (여럿이면 인원수만큼 동시에, 혼자면 번호 순서 3개) */
+  private newPuzzleRound() {
+    const alive = this.aliveCount();
+    const solo = alive <= 1;
+    const n = solo ? 3 : Math.max(2, Math.min(4, alive));
+    this.plates = [];
+    for (let k = 0; k < 200 && this.plates.length < n; k++) {
+      const pt = randomFloorPoint(this.map, this.map.spawn, 40);
+      if (this.plates.some((q) => Math.hypot(q.x - pt.x, q.y - pt.y) < 48)) continue;
+      this.plates.push({ x: pt.x, y: pt.y, lit: false, order: solo ? this.plates.length + 1 : 0 });
+    }
+    this.puzNext = 1;
+    this.puzHold = 0;
+  }
+
+  /** v1.8 미니 게임·상인 진행. 끝나면 true */
+  private updateMiniRoom(): boolean {
+    this.eventT -= DT;
+    const alive = [...this.players.values()].filter((p) => !p.ghost && !p.dc);
+    if (alive.length === 0) { this.finish(false); return true; }
+    const mul = worldRewardMul(this.powerWorld);
+    if (this.stageKind === "collapse") {
+      // 타일에 금이 가고(1초 경고) → 무너져 구멍. 갈수록 빨라짐, 바닥은 30%는 남김
+      for (const [idx, t] of [...this.crack]) {
+        const nt = t - DT;
+        if (nt > 0) { this.crack.set(idx, nt); continue; }
+        this.crack.delete(idx);
+        this.map.tiles = this.map.tiles.slice(0, idx) + "v" + this.map.tiles.slice(idx + 1);
+        this.holes.push(idx);
+      }
+      this.crackT -= DT;
+      const floor = this.map.tiles.split("").filter((c) => c !== "#" && c !== "v").length;
+      if (this.crackT <= 0 && this.eventT > 1 && floor - this.crack.size > this.floor0 * 0.3) {
+        this.crackT = Math.max(0.22, 0.55 - (30 - this.eventT) * 0.012);
+        const w = this.map.w;
+        const targets: number[] = [];
+        // 하나는 아무 용사의 발밑, 나머지는 무작위
+        const victim = pick(alive);
+        targets.push(Math.floor(victim.y / 16) * w + Math.floor(victim.x / 16));
+        for (let k = 0; k < 1 + Math.floor(alive.length / 2); k++) targets.push(Math.floor(Math.random() * this.map.tiles.length));
+        for (const idx of targets) {
+          const ch = this.map.tiles[idx];
+          if (ch === undefined || ch === "#" || ch === "v" || this.crack.has(idx)) continue;
+          this.crack.set(idx, 1);
+        }
+      }
+      if (this.eventT <= 0) {
+        let winners = 0;
+        for (const p of alive) {
+          if (p.fell) continue;
+          winners++;
+          const gold = Math.round(40 * mul);
+          p.gold += gold;
+          this.checkRich(p);
+          const card = this.randomCard(p, ["rare"]);
+          if (card) { this.giveCard(p, card); this.sendTo(p.id, { t: "toast", msg: `버텼다! +${gold}원 · 「${CARD_BY_ID[card].name}」` }); }
+        }
+        this.title(winners ? "버텼다!" : "모두 떨어졌어요...", winners ? "끝까지 버틴 용사는 돈 + 희귀 카드" : "다음엔 꼭!", winners ? "#f8d040" : "#a0a0b0");
+        this.endMiniRoom();
+        return true;
+      }
+    } else if (this.stageKind === "puzzle") {
+      const solo = this.plates.some((q) => q.order > 0);
+      for (const q of this.plates) {
+        const on = alive.some((p) => Math.hypot(p.x - q.x, p.y - q.y) < 12);
+        if (!solo) q.lit = on;
+        else if (on && !q.lit) {
+          // 혼자: 순서대로 밟아야 함. 틀리면 처음부터
+          if (q.order === this.puzNext) { q.lit = true; this.puzNext++; this.fx.push({ k: "shield", x: Math.round(q.x), y: Math.round(q.y) }); }
+          else {
+            for (const o of this.plates) o.lit = false;
+            this.puzNext = 1;
+            this.fx.push({ k: "hit", x: Math.round(q.x), y: Math.round(q.y) });
+          }
+        }
+      }
+      const all = this.plates.length > 0 && this.plates.every((q) => q.lit);
+      this.puzHold = all ? this.puzHold + DT : 0;
+      if (this.puzHold >= (solo ? 0.1 : 0.6)) {
+        this.puzRound++;
+        for (const q of this.plates) this.fx.push({ k: "revive", x: Math.round(q.x), y: Math.round(q.y) });
+        if (this.puzRound >= 3) {
+          this.puzDone = true;
+          for (const p of alive) {
+            const gold = Math.round(50 * mul);
+            p.gold += gold;
+            this.checkRich(p);
+            const card = this.randomCard(p, ["rare"]);
+            if (card) { this.giveCard(p, card); this.sendTo(p.id, { t: "toast", msg: `퍼즐 성공! +${gold}원 · 「${CARD_BY_ID[card].name}」` }); }
+          }
+          this.title("퍼즐 성공!", "모두 돈 + 희귀 카드", "#60d0f0");
+          this.endMiniRoom();
+          return true;
+        }
+        this.broadcast({ t: "toast", msg: `발판 ${this.puzRound} / 3 성공!` });
+        this.newPuzzleRound();
+      }
+      if (this.eventT <= 0) {
+        this.title("시간 초과", `${this.puzRound} / 3 성공 — 보상은 없어요`, "#a0a0b0");
+        this.endMiniRoom();
+        return true;
+      }
+    } else {
+      const atExit = alive.every((p) => Math.hypot(p.x - this.map.portal.x, p.y - this.map.portal.y) < PORTAL_RANGE);
+      if (this.eventT <= 0 || atExit) { this.endMiniRoom(); return true; }
+    }
+    return false;
+  }
+
+  private endMiniRoom() {
+    this.merchant = null;
+    this.plates = [];
+    this.crack.clear();
+    for (const q of this.players.values()) if (q.ghost) { q.ghost = false; q.hp = Math.ceil(q.stats.maxHp * REVIVE_HP); }
+    this.openCards();
   }
 
   /** 제단에 피를 바침: 체력 30% (최소 1 남음) → 전설 카드 */
@@ -2252,6 +2478,8 @@ export class Game {
       if (this.updateTreasure()) return;
     } else if (this.phase === "play" && (this.stageKind === "goldrush" || this.stageKind === "altar")) {
       if (this.updateEventRoom()) return;
+    } else if (this.phase === "play" && (this.stageKind === "collapse" || this.stageKind === "puzzle" || this.stageKind === "merchant")) {
+      if (this.updateMiniRoom()) return;
     } else if (this.phase === "play" && this.panic) {
       this.updatePanic();
     } else if (this.phase === "play") {
@@ -2276,6 +2504,9 @@ export class Game {
         else if (this.stageKind === "battle" && roll < 0.24) this.startTreasure();
         else if (this.stageKind === "battle" && (forced === "goldrush" || (!forced && roll < 0.34))) this.startGoldRush();
         else if (this.stageKind === "battle" && (forced === "altar" || (!forced && roll < 0.42))) this.startAltar();
+        // v1.8: 미니 게임 8% · 떠도는 상인 7%
+        else if (this.stageKind === "battle" && (forced === "collapse" || forced === "puzzle" || (!forced && roll < 0.5))) this.startMiniGame();
+        else if (this.stageKind === "battle" && (forced === "merchant" || (!forced && roll < 0.57))) this.startMerchant();
         else this.openCards();
         return;
       }
@@ -2473,7 +2704,10 @@ export class Game {
     if (p.dashT <= 0 && !p.spec) {
       if (tile === "v") {
         // 구멍에 빠짐 → 피해는 한 번만 (1.5초 동안 다시 안 받음) + 안전한 곳에서 구멍 반대쪽으로 튕겨 나감
-        if ((p.fallCd ?? 0) <= 0) {
+        if (this.stageKind === "collapse") {
+          // v1.8 무너지는 바닥: 피해 없음, 대신 보상 없음
+          if (!p.fell) { p.fell = true; this.sendTo(p.id, { t: "toast", msg: "떨어졌어요! 이번 보상은 못 받지만 끝날 때까지 구경해요" }); }
+        } else if ((p.fallCd ?? 0) <= 0) {
           this.tickDamage(p, p.stats.maxHp * 0.06);
           p.fallCd = 1.5;
         }
@@ -4363,7 +4597,12 @@ export class Game {
       warp: this.warpState() || undefined,
       trialT: this.stageKind === "trial" && this.phase === "play" ? Math.max(0, Math.ceil(this.trialT)) : undefined,
       treasureT: this.stageKind === "treasure" && this.phase === "play" ? Math.max(0, Math.ceil(this.treasureT)) : undefined,
-      eventT: (this.stageKind === "goldrush" || this.stageKind === "altar") && this.phase === "play" ? Math.max(0, Math.ceil(this.eventT)) : undefined,
+      eventT: (this.stageKind === "goldrush" || this.stageKind === "altar" || this.stageKind === "collapse" || this.stageKind === "puzzle" || this.stageKind === "merchant") && this.phase === "play" ? Math.max(0, Math.ceil(this.eventT)) : undefined,
+      crack: this.stageKind === "collapse" && this.crack.size ? [...this.crack.keys()] : undefined,
+      holes: this.stageKind === "collapse" && this.holes.length ? this.holes : undefined,
+      plates: this.stageKind === "puzzle" && this.plates.length ? this.plates.map((q) => [Math.round(q.x), Math.round(q.y), q.lit ? 1 : 0, q.order] as [number, number, number, number]) : undefined,
+      puzR: this.stageKind === "puzzle" ? this.puzRound : undefined,
+      puzN: this.stageKind === "puzzle" ? 3 : undefined,
       panic: this.panic ? {
         z: this.zone, m: this.mission, t: Math.max(0, Math.round(this.panicT * 10) / 10),
         got: this.mission === "collect" ? this.keyGot : this.mission === "exit" ? this.atExit() : this.panicKilled(),
