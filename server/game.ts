@@ -516,6 +516,14 @@ export class Game {
     // 테스트용: START_WORLD=5, START_ROUND=3 처럼 시작 지점 지정
     if (process.env.START_WORLD) this.world = Math.max(1, Math.min(WORLD_COUNT, Number(process.env.START_WORLD)));
     this.round = Math.max(0, Number(process.env.START_ROUND ?? 1) - 1);
+    // 테스트용: START_EVENT=collapse|puzzle|merchant 이면 그 이벤트 방에서 바로 시작
+    const se = process.env.START_EVENT;
+    if (se === "merchant" || se === "collapse" || se === "puzzle") {
+      this.round = 1;
+      if (se === "merchant") this.startMerchant();
+      else { process.env.FORCE_EVENT_ROOM = se; this.startMiniGame(); }
+      return;
+    }
     this.nextRound();
   }
 

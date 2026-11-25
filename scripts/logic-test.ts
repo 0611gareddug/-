@@ -610,7 +610,7 @@ gdc.tick();
 const stay = gdc.players.get(1)!;
 stay.x = GDC.map.portal.x; stay.y = GDC.map.portal.y;
 gdc.tick();
-check("재접속: 포탈은 연결된 사람만 모이면 출발", GDC.phase === "cards" || GDC.phase === "trialvote" || GDC.stageKind === "treasure" || GDC.stageKind === "goldrush" || GDC.stageKind === "altar");
+check("재접속: 포탈은 연결된 사람만 모이면 출발", GDC.phase === "cards" || GDC.phase === "trialvote" || GDC.stageKind === "treasure" || GDC.stageKind === "goldrush" || GDC.stageKind === "altar" || ["collapse", "puzzle", "merchant"].includes(GDC.stageKind));
 gdc.setDisconnected(2, false);
 check("재접속: 돌아오면 다시 정상", lv.dc === false);
 
