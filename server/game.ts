@@ -3,7 +3,7 @@ import {
   PLAYER_RADIUS, PORTAL_RANGE, REST_MAX_TIME, REVIVE_HP, REVIVE_RANGE, REVIVE_TIME, ROUND_HEAL, ROUNDS_PER_WORLD,
   VOTE_TIME, xpToNext,
 } from "../shared/constants";
-import { CLASSES, CLASS_IDS, SKILL_UNLOCK, type ClassId, type ProjKind } from "../shared/classes";
+import { CLASSES, CLASS_IDS, MANA_MAX, MANA_PER_MINION, MINION_MAX, SKILL_UNLOCK, type ClassId, type ProjKind } from "../shared/classes";
 import {
   CARDS, CARD_BY_ID, FORGE_PRICE, GACHA_PRICE, baseStats, canForge, type CardCtx, type Rarity, type Stats, type TeamFlag,
 } from "../shared/cards";
@@ -39,6 +39,8 @@ export interface Participant {
 const CODEX_MONSTERS = Object.keys(MONSTERS).filter((k) => !["pvp", "dummy", "chest"].includes(k));
 
 export interface Player extends Participant {
+  /** v1.8 네크로맨서 마력 (처치마다 +1, 최대 MANA_MAX, 마물 소환에 모두 씀) */
+  mana?: number;
   /** 구멍 낙하 피해 쿨타임 */
   fallCd?: number;
   /** 커맨드 관전·투명 모드 */
@@ -246,6 +248,8 @@ export interface Proj {
   hops?: number;
   /** 닌자 특성 '부메랑': 끝에서 되돌아옴 */
   boomer?: boolean;
+  /** v1.8 원거리 평타 관통 무제한: 지금까지 뚫은 수 (뚫을 때마다 피해 -10%, 최저 50%) */
+  pierceAll?: number;
   hit: Set<number>;
 }
 
@@ -271,9 +275,14 @@ interface Pet {
   x: number;
   y: number;
   cd: number;
-  /** clone: 꼬마 분신 카드 / spider: 엔지니어 거미 포탑 / turret: 설치 포탑 / drone: 수리 드론 / shadow: 닌자 분신 / ghost: 네크로 유령 */
-  kind: "clone" | "spider" | "turret" | "drone" | "shadow" | "ghost";
+  /** clone: 꼬마 분신 카드 / spider: 엔지니어 거미 포탑 / turret: 설치 포탑 / drone: 수리 드론 / shadow: 닌자 분신 / ghost: 네크로 유령
+   *  v1.8 miniboss: 네크로 마물(미니 보스) / minion: 마물의 부하 */
+  kind: "clone" | "spider" | "turret" | "drone" | "shadow" | "ghost" | "miniboss" | "minion";
   aim: number;
+  /** 마물·부하의 몬스터 모습 (MONSTERS 키) */
+  mon?: string;
+  /** 마물 고유 패턴 쿨타임 */
+  patT?: number;
   /** 남은 시간 (없으면 영구) */
   life?: number;
 }
@@ -2554,21 +2563,17 @@ export class Game {
       if ((p.robotT ?? 0) > 0) {
         // 엔지니어 거대 로봇: 평타가 폭발 미사일
         p.atkCd = 0.42 / p.stats.atkSpdMul;
-        const pr = this.fireProj(p, "missile", aim, 240, 0.9, 13, { onHit: true });
-        pr.explode = 22;
+        // v1.8: 미사일 13→12, 폭발 반경 22→20 (범위 너프)
+        const pr = this.fireProj(p, "missile", aim, 240, 0.9, 12, { onHit: true });
+        pr.explode = 20;
       } else if (def.attack.kind === "flame") {
         // 화염방사: 짧은 부채꼴, 맞은 적은 화상(지속 피해). 평타 효과는 3번에 1번만
         const range = (def.attack.range ?? 42) * (p.stats.napalm ? 1.5 : 1) * Math.sqrt(size);
         const arc = p.stats.multishot ? 1.6 : 1;
         if (p.atkCount % 2 === 0) this.fx.push({ k: "flame", x: Math.round(p.x), y: Math.round(p.y), a: aim, r: Math.round(range) });
-        for (const m of [...this.monsters]) {
-          if (m.spawnT > 0) continue;
-          const d = Math.hypot(m.x - p.x, m.y - p.y);
-          if (d > range + m.r) continue;
-          let diff = Math.atan2(m.y - p.y, m.x - p.x) - aim;
-          diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-          if (Math.abs(diff) > arc / 2) continue;
-          this.dealDamage(m, base, p, { onHit: p.atkCount % 3 === 0, noCrit: p.atkCount % 3 !== 0 });
+        for (const { m, k } of this.arcTargets(p, range, aim, arc)) {
+          // v1.8: 가장 가까운 적 말고는 피해 ×0.7 (범위 너프, 보스 단일 피해는 그대로)
+          this.dealDamage(m, base * (k === 0 ? 1 : 0.7), p, { onHit: p.atkCount % 3 === 0, noCrit: p.atkCount % 3 !== 0 });
           if (m.kind !== "pvp" && m.kind !== "dummy") {
             m.poisonT = Math.max(m.poisonT, 2);
             m.poisonDps = Math.max(m.poisonDps, 3 * p.stats.atkMul * (p.stats.napalm ? 2 : 1));
@@ -2587,14 +2592,10 @@ export class Game {
         const range = ((def.attack.range ?? 24) + p.stats.pierce * 6) * Math.sqrt(size) + (p.giantT > 0 ? 16 : 0);
         const arc = p.stats.multishot ? (200 * Math.PI) / 180 : (110 * Math.PI) / 180;
         this.fx.push({ k: "swing", x: p.x, y: p.y, a: aim, r: range });
-        for (const m of [...this.monsters]) {
-          if (m.spawnT > 0) continue;
-          const d = Math.hypot(m.x - p.x, m.y - p.y);
-          if (d > range + m.r) continue;
-          let diff = Math.atan2(m.y - p.y, m.x - p.x) - aim;
-          diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-          if (Math.abs(diff) > arc / 2) continue;
-          this.dealDamage(m, base, p, { onHit: true, crit: forceCrit });
+        for (const { m, k } of this.arcTargets(p, range, aim, arc)) {
+          // v1.8 검사: 2번째 적부터 피해 감소 (0.8 → 최저 0.7), 한 마리만 벨 땐 그대로
+          const fall = p.cls === "warrior" && k > 0 ? Math.max(0.7, 0.85 - 0.05 * k) : 1;
+          this.dealDamage(m, base * fall, p, { onHit: true, crit: forceCrit });
           // 타격감: 일반 몹은 살짝 밀려남
           if (m.hp > 0 && !m.def.boss && m.kind !== "dummy" && m.kind !== "chest" && m.kind !== "pvp" && m.def.ai !== "turret" && m.def.ai !== "shield") {
             const dd = Math.hypot(m.x - p.x, m.y - p.y) || 1;
@@ -2612,6 +2613,7 @@ export class Game {
         for (const a of angles) {
           const pr = this.fireProj(p, def.attack.projKind ?? "arrow", a, def.attack.projSpeed ?? 200, life, each, { onHit: true });
           if (def.attack.explode) pr.explode = def.attack.explode;
+          if (def.pierceAll) pr.pierceAll = 0;
           if (pr.kind === "note") pr.hops = 1 + (p.stats.echo ? 2 : 0);
           if (p.surgeT > 0) pr.explode = Math.max(pr.explode, 24);
         }
@@ -2624,6 +2626,23 @@ export class Game {
         }
       }
     }
+  }
+
+  /** 부채꼴 안 적을 가까운 순으로 (k = 순번) */
+  private arcTargets(p: Player, range: number, aim: number, arc: number) {
+    const out: { m: Monster; d: number; k: number }[] = [];
+    for (const m of this.monsters) {
+      if (m.spawnT > 0) continue;
+      const d = Math.hypot(m.x - p.x, m.y - p.y);
+      if (d > range + m.r) continue;
+      let diff = Math.atan2(m.y - p.y, m.x - p.x) - aim;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      if (Math.abs(diff) > arc / 2) continue;
+      out.push({ m, d, k: 0 });
+    }
+    out.sort((a, b) => a.d - b.d);
+    out.forEach((o, i) => { o.k = i; });
+    return out;
   }
 
   reversed(p: Player) {
@@ -2677,7 +2696,153 @@ export class Game {
 
   /** 시간제 소환물 (포탑 설치 · 드론 · 분신 · 유령) */
   summon(p: Player, kind: Pet["kind"], life: number, at?: { x: number; y: number }) {
-    this.pets.push({ id: this.nextId(), ownerId: p.id, x: at?.x ?? p.x, y: at?.y ?? p.y, cd: 0.5, kind, aim: 0, life });
+    const pt: Pet = { id: this.nextId(), ownerId: p.id, x: at?.x ?? p.x, y: at?.y ?? p.y, cd: 0.5, kind, aim: 0, life };
+    this.pets.push(pt);
+    return pt;
+  }
+
+  /** v1.8 네크로 마물 소환: 이 월드 보스의 미니 버전 + 마력 10마다 부하 1마리. 마력은 모두 씀 */
+  summonFiend(p: Player, life: number) {
+    for (const old of this.pets.filter((pt) => pt.ownerId === p.id && (pt.kind === "miniboss" || pt.kind === "minion"))) this.removePet(old.id);
+    const w = this.worldDef ?? WORLDS[0];
+    const boss = this.summonableBoss(w.boss);
+    const mb = this.summon(p, "miniboss", life, { x: p.x, y: p.y - 14 });
+    mb.mon = boss;
+    mb.patT = 1.5;
+    // 부하: 이 월드 잡몹 중 근접형 모습
+    const cand = [w.monsters[0], w.monsters[1], w.extra].filter((k) => MONSTERS[k] && !["shooter", "turret", "barrage", "caster"].includes(MONSTERS[k].ai));
+    const look = cand[0] ?? w.monsters[0];
+    const n = Math.min(MINION_MAX, Math.floor((p.mana ?? 0) / MANA_PER_MINION));
+    for (let i = 0; i < n; i++) {
+      const a = (i / Math.max(1, n)) * Math.PI * 2;
+      let at = { x: p.x + Math.cos(a) * 22, y: p.y + Math.sin(a) * 16 };
+      if (isWallAt(this.map, at.x, at.y)) at = { x: p.x, y: p.y };
+      const mn = this.summon(p, "minion", life, at);
+      mn.mon = look;
+      mn.cd = 0.3 + i * 0.1;
+    }
+    p.mana = 0;
+    this.fx.push({ k: "awaken", x: Math.round(p.x), y: Math.round(p.y), r: 50 });
+    this.fx.push({ k: "boom", x: Math.round(p.x), y: Math.round(p.y - 14), r: 30 });
+    return n;
+  }
+
+  /** 소환할 수 있는 보스 (몬스터 표에 없으면 왕 슬라임) */
+  private summonableBoss(id: string) {
+    return MONSTERS[id]?.boss ? id : "king_slime";
+  }
+
+  /** 마물·부하 행동: 가까운 적에게 달려가 몸통 공격, 마물은 가끔 보스 고유 패턴을 약하게 */
+  private updateFiend(pt: Pet, o: Player) {
+    const boss = pt.kind === "miniboss";
+    let best: Monster | null = null;
+    let bd = boss ? 240 : 200;
+    for (const m of this.monsters) {
+      if (m.spawnT > 0 || m.kind === "chest" || m.kind === "dummy" && !this.isRest) continue;
+      if (m.kind === "pvp" && !this.canPvp(o.id, m.owner ?? -1)) continue;
+      const d = Math.hypot(m.x - pt.x, m.y - pt.y);
+      if (d < bd) { bd = d; best = m; }
+    }
+    const speed = boss ? 70 : 95;
+    let tx = o.x, ty = o.y + 12;
+    if (best) { tx = best.x; ty = best.y; pt.aim = Math.atan2(best.y - pt.y, best.x - pt.x); }
+    const dx = tx - pt.x, dy = ty - pt.y;
+    const d = Math.hypot(dx, dy);
+    const stop = best ? best.r + (boss ? 10 : 5) : 18;
+    if (d > stop) {
+      const step = Math.min(d - stop, speed * DT);
+      // 주인에게서 너무 멀어지면 순간이동으로 따라옴
+      if (!best && d > 260) { pt.x = o.x; pt.y = o.y; } else {
+        const pos = moveCircle(this.map, pt.x, pt.y, boss ? 6 : 4, (dx / d) * step, (dy / d) * step);
+        pt.x = pos.x; pt.y = pos.y;
+      }
+    }
+    pt.cd -= DT;
+    if (best && pt.cd <= 0 && bd < best.r + (boss ? 16 : 10)) {
+      pt.cd = boss ? 0.9 : 0.8;
+      this.dealDamage(best, boss ? 20 : 8, o, { skill: true });
+      this.fx.push({ k: "swing", x: Math.round(pt.x), y: Math.round(pt.y), a: pt.aim, r: boss ? 20 : 12 });
+    }
+    if (!boss || !best) return;
+    pt.patT = (pt.patT ?? 0) - DT;
+    if (pt.patT > 0) return;
+    pt.patT = 3.5;
+    this.fiendPattern(pt, o, best);
+  }
+
+  /** 마물 보스 고유 패턴 (아군 버전, 원래보다 약하게) */
+  private fiendPattern(pt: Pet, o: Player, target: Monster) {
+    const ring = (kind: ProjKind, n: number, dmg: number) => {
+      for (let i = 0; i < n; i++) {
+        const pr = this.fireProj(o, kind, (i / n) * Math.PI * 2, 150, 0.9, dmg, { skill: true });
+        pr.x = pt.x; pr.y = pt.y; pr.pierce = 0; pr.bounce = 0;
+      }
+    };
+    const enemies = () => this.monsters
+      .filter((m) => m.spawnT <= 0 && m.kind !== "chest" && m.kind !== "dummy" && m.kind !== "pvp" && Math.hypot(m.x - pt.x, m.y - pt.y) < 180)
+      .sort((a, b) => Math.hypot(a.x - pt.x, a.y - pt.y) - Math.hypot(b.x - pt.x, b.y - pt.y));
+    switch (pt.mon) {
+      case "king_slime":
+        // 점프 착지
+        pt.x = target.x; pt.y = target.y;
+        this.explode(target.x, target.y, 42, 35, o, true);
+        break;
+      case "pharaoh": ring("sand", 12, 14); break;
+      case "flower_queen":
+        ring("seed", 12, 12);
+        for (const m of enemies().slice(0, 6)) { m.poisonT = Math.max(m.poisonT, 3); m.poisonDps = Math.max(m.poisonDps, 5 * o.stats.atkMul); m.poisonOwner = o.id; }
+        break;
+      case "ghost_captain": ring("spirit", 14, 13); break;
+      case "yeti": {
+        // 돌진: 대상 쪽으로 몸통 박치기 (지나가는 길의 적 모두)
+        const a = Math.atan2(target.y - pt.y, target.x - pt.x);
+        const ex = pt.x + Math.cos(a) * 90, ey = pt.y + Math.sin(a) * 90;
+        this.fx.push({ k: "line", x: Math.round(pt.x), y: Math.round(pt.y), r: 12, pts: [Math.round(ex), Math.round(ey)] });
+        for (const m of enemies()) {
+          const t = Math.max(0, Math.min(1, ((m.x - pt.x) * (ex - pt.x) + (m.y - pt.y) * (ey - pt.y)) / (90 * 90)));
+          if (Math.hypot(m.x - (pt.x + (ex - pt.x) * t), m.y - (pt.y + (ey - pt.y) * t)) < 12 + m.r) {
+            this.dealDamage(m, 35, o, { skill: true });
+            if (!m.def.boss) m.stunT = Math.max(m.stunT, 0.6);
+          }
+        }
+        const pos = moveCircle(this.map, pt.x, pt.y, 6, ex - pt.x, ey - pt.y);
+        pt.x = pos.x; pt.y = pos.y;
+        break;
+      }
+      case "thunder_eagle":
+        for (const m of enemies().slice(0, 3)) {
+          this.fx.push({ k: "bolt", x: Math.round(m.x), y: Math.round(m.y), r: 20 });
+          this.dealDamage(m, 38, o, { skill: true });
+        }
+        break;
+      case "demon_lord":
+        for (const m of enemies().slice(0, 3)) this.addZone("fire", m.x, m.y, 26, o.id, 4, 2.5);
+        this.fx.push({ k: "flame", x: Math.round(pt.x), y: Math.round(pt.y), a: pt.aim, r: 40 });
+        break;
+      case "prank_god":
+        // 십자 심판: 네 방향 빛줄기
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          const ex = pt.x + Math.cos(a) * 110, ey = pt.y + Math.sin(a) * 110;
+          this.fx.push({ k: "line", x: Math.round(pt.x), y: Math.round(pt.y), r: 10, pts: [Math.round(ex), Math.round(ey)] });
+          for (const m of enemies()) {
+            const t = Math.max(0, Math.min(1, ((m.x - pt.x) * (ex - pt.x) + (m.y - pt.y) * (ey - pt.y)) / (110 * 110)));
+            if (Math.hypot(m.x - (pt.x + (ex - pt.x) * t), m.y - (pt.y + (ey - pt.y) * t)) < 10 + m.r) this.dealDamage(m, 30, o, { skill: true });
+          }
+        }
+        break;
+      case "clock_keeper":
+        // 톱니 회전: 주변을 갈아버림 + 둔화
+        this.fx.push({ k: "spin", x: Math.round(pt.x), y: Math.round(pt.y), r: 50 });
+        for (const m of enemies()) {
+          if (Math.hypot(m.x - pt.x, m.y - pt.y) > 50 + m.r) continue;
+          this.dealDamage(m, 32, o, { skill: true });
+          m.slowT = Math.max(m.slowT, 2);
+        }
+        break;
+      default:
+        this.explode(target.x, target.y, 36, 30, o, true);
+    }
   }
 
   private updatePets() {
@@ -2696,8 +2861,12 @@ export class Game {
     for (const pt of this.pets) {
       const o = this.players.get(pt.ownerId);
       if (!o) continue;
+      if (pt.kind === "miniboss" || pt.kind === "minion") {
+        if (!o.ghost) this.updateFiend(pt, o);
+        continue;
+      }
       if (pt.kind !== "turret") {
-        const mine = this.pets.filter((q) => q.ownerId === o.id && q.kind !== "turret");
+        const mine = this.pets.filter((q) => q.ownerId === o.id && q.kind !== "turret" && q.kind !== "miniboss" && q.kind !== "minion");
         const idx = mine.indexOf(pt);
         // 주인 뒤쪽에 반원으로 졸졸 따라다님 (드론은 머리 위)
         const ang = Math.PI / 2 + (idx - (mine.length - 1) / 2) * 0.7;
@@ -3446,6 +3615,12 @@ export class Game {
             dead = true;
             break;
           }
+          if (pr.pierceAll !== undefined) {
+            // v1.8 원거리 평타 관통: 뚫을 때마다 -10% (최저 50%), 끝까지 날아감
+            this.dealDamage(m, pr.dmg * sniper * Math.max(0.5, 1 - 0.1 * pr.pierceAll), owner, { skill: pr.skill, onHit: pr.onHit });
+            pr.pierceAll++;
+            continue;
+          }
           this.dealDamage(m, pr.dmg * sniper, owner, { skill: pr.skill, onHit: pr.onHit });
           // 바드 음표: 근처 다른 적에게 튕김
           if (pr.hops && pr.hops > 0) {
@@ -3758,6 +3933,8 @@ export class Game {
       }
     }
     killer.kills++;
+    // v1.8 네크로 마력: 처치할 때마다 +1 (소환물이 잡아도 주인 몫)
+    if (killer.cls === "necro" && m.kind !== "dummy" && m.kind !== "chest" && m.kind !== "pvp") killer.mana = Math.min(MANA_MAX, (killer.mana ?? 0) + 1);
     this.fx.push({ k: "die", x: Math.round(m.x), y: Math.round(m.y), r: m.r });
 
     // 경험치: 넣은 피해 비율만큼 / 돈: 기여도 1위가 전부 (보스는 생존자 균등)
@@ -3937,6 +4114,7 @@ export class Game {
           cds: p.cds.map((c) => Math.round(c * 10) / 10),
           cdm: ((c) => (this.changed(this.sentCdm, p.id, c.join(","), full) ? c : undefined))(CLASSES[p.cls].skills.map((s, i) => (this.isRest ? 0.3 : Math.round(skillCd(s.cd, p.stats, i) * 10) / 10))),
           lv: p.level, xp: Math.floor(p.xp), xpn: xpToNext(p.level), gold: p.gold,
+          mana: p.cls === "necro" ? (p.mana ?? 0) : undefined,
           shield: Math.ceil(p.shield), giant: p.giantT > 0,
           size: Math.round(p.stats.sizeMul * (p.giantT > 0 ? 2 : 1) * 100) / 100,
           rev: this.reversed(p), shake: !!p.stats.aimShake, ps, god: p.god || undefined, song: p.songOn || undefined, aw: p.level >= SKILL_UNLOCK[4] || undefined, sa: (p.sanctT ?? 0) > 0 ? 1 : (p.banquetT ?? 0) > 0 ? 2 : undefined, ob: p.stats.orbit || undefined, cb: (p.combo ?? 0) >= 3 ? p.combo : undefined, off: p.dc || undefined, spec: p.spec || undefined,
@@ -3949,6 +4127,7 @@ export class Game {
         id: pt.id, owner: pt.ownerId, x: round1(pt.x), y: round1(pt.y),
         k: pt.kind,
         a: Math.round(pt.aim * 100) / 100,
+        m: pt.mon,
       })),
 
       portal: this.portalOpen ? this.map.portal : null,
@@ -3972,7 +4151,7 @@ export class Game {
     const mlist = this.monsters.filter((m) => m.kind !== "pvp").map((m) => ({ m, ...this.monsterBase(m) }));
     // 다른 사람에겐 필요 없는 내 정보(쿨타임·경험치·돈·속도)는 본인에게만
     const lite = common.players.map((q) => {
-      const { cds: _a, cdm: _b, xp: _c, xpn: _d, gold: _e, spd: _f, rev: _g, ...rest } = q;
+      const { cds: _a, cdm: _b, xp: _c, xpn: _d, gold: _e, spd: _f, rev: _g, mana: _h, ...rest } = q;
       return rest as SnapPlayer;
     });
     if (this.rawSend) {

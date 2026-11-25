@@ -405,6 +405,8 @@ body.touch .hud-help, body.touch .skill-bar { display: none; }
 .hud-cards { bottom: 84px; flex-wrap: wrap; max-width: 520px; justify-content: center; }
 .xpbar { height: 4px; background: #000; }
 .xpbar > i { display: block; height: 100%; background: var(--legend); }
+.xpbar.mana > i { background: linear-gradient(90deg, #7a40c0, #c090ff); box-shadow: 0 0 4px #c090ff; }
+.skill-slot .mana-badge { position: absolute; right: 2px; top: 2px; font-size: 10px; color: #e0c8ff; background: #3a1a5acc; padding: 0 3px; border-radius: 3px; z-index: 2; }
 .gold { color: var(--legend); }
 
 /* ---------- 휴게소 / 암시장 ---------- */

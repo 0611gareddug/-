@@ -30,9 +30,15 @@ function run(cls: ClassId, level: number, mode: "old" | "new", tal: Record<strin
     p.god = true;
     g.monsters = [];
     G.portalOpen = false;
-    for (let i = 0; i < 10; i++) {
+    // FORM: ring(기본, 둘러싸임) · line(한쪽에서 몰려옴) · single(보스 1마리)
+    const form = process.env.FORM ?? "ring";
+    const n = form === "single" ? 1 : 10;
+    for (let i = 0; i < n; i++) {
       const a = (i / 10) * Math.PI * 2;
-      const m = g.spawnMonster("slime", { x: p.x + Math.cos(a) * (30 + (i % 3) * 20), y: p.y + Math.sin(a) * (30 + (i % 3) * 20) })!;
+      const at = form === "line" ? { x: p.x + 40 + (i % 5) * 14, y: p.y + (Math.floor(i / 5) - 0.5) * 14 }
+        : form === "single" ? { x: p.x + 50, y: p.y }
+        : { x: p.x + Math.cos(a) * (30 + (i % 3) * 20), y: p.y + Math.sin(a) * (30 + (i % 3) * 20) };
+      const m = g.spawnMonster("slime", at)!;
       if (!m) continue;
       m.spawnT = 0;
       m.hp = m.mhp = 1e9;
@@ -44,7 +50,7 @@ function run(cls: ClassId, level: number, mode: "old" | "new", tal: Record<strin
       if (!target) break;
       p.input = { up: false, down: false, left: false, right: false, ax: target.x, ay: target.y, atk: true, dashSeq: 0 };
       // 닌자 천벌은 즉사라 측정에서 뺌
-      for (let s = 0; s < (process.env.AW === "0" ? 4 : 5); s++) if (p.cds[s] <= 0 && !(cls === "ninja" && s === 3)) g.handleCast(1, s, target.x, target.y);
+      for (let s = 0; s < (process.env.NOSKILL ? 0 : process.env.AW === "0" ? 4 : 5); s++) if (p.cds[s] <= 0 && !(cls === "ninja" && s === 3) && (!process.env.ONLY || process.env.ONLY.split(",").includes(String(s)))) g.handleCast(1, s, target.x, target.y);
       G.phase = "play";
       g.tick();
       for (const m of g.monsters) m.hp = Math.max(m.hp, 1e8);
@@ -71,6 +77,11 @@ function bestTalents(cls: ClassId, level: number) {
 }
 
 const pct = (a: number, b: number) => `${a >= b ? "+" : ""}${Math.round((a / b - 1) * 100)}%`;
+if (process.env.QUICK) {
+  const lv = Number(process.env.LV ?? 20);
+  for (const cls of CLASS_IDS) console.log(cls.padEnd(9), run(cls, lv, "new", {}).toFixed(0).padStart(5));
+  process.exit(0);
+}
 for (const level of (process.env.LV ?? "1,10,20").split(",").map(Number)) {
   console.log(`\n== Lv${level} (특성 포인트 ${talentPoints(level)}) — 초당 피해 ==`);
   for (const cls of CLASS_IDS) {

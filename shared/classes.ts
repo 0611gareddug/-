@@ -42,9 +42,16 @@ export interface ClassDef {
   skillDmg?: number;
   /** 직업 밸런스: 받는 피해 배율 (근접 0.85) */
   dmgTaken?: number;
+  /** v1.8 평타가 모든 적을 관통 (뚫을 때마다 피해 -10%, 최저 50%) */
+  pierceAll?: boolean;
   /** 로비 묶음 */
   group: "melee" | "ranged" | "support";
 }
+
+/** v1.8 네크로 마력 최대치 / 마력 몇당 부하 1마리 / 부하 최대 수 */
+export const MANA_MAX = 60;
+export const MANA_PER_MINION = 10;
+export const MINION_MAX = 6;
 
 /** 스킬이 열리는 레벨 (5번째 = v1.6 각성) */
 export const SKILL_UNLOCK = [1, 3, 6, 10, 15];
@@ -70,13 +77,14 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   },
   archer: {
     id: "archer",
+    pierceAll: true,
     name: "궁수",
     role: "원거리 딜러",
     group: "ranged",
-    hp: 90,
+    // v1.8: 체력 90→105, 평타 9→13, 공격 속도 0.38→0.3초 + 평타 관통
+    hp: 105,
     speed: 74,
-    // v0.9: 평타 피해 -10%
-    attack: { kind: "proj", dmg: 9, cd: 0.38, projKind: "arrow", projSpeed: 230, projLife: 0.9 },
+    attack: { kind: "proj", dmg: 13, cd: 0.3, projKind: "arrow", projSpeed: 230, projLife: 0.9 },
     skills: [
       { name: "화살비", desc: "조준한 곳에 2초간 화살비", cd: 13.5, aim: "point", range: 140, radius: 40, unlock: 1 },
       { name: "올가미 덫", desc: "덫 설치, 밟은 적 2초 속박 (최대 3개)", cd: 9, aim: "point", range: 120, radius: 10, unlock: 3 },
@@ -105,13 +113,14 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   },
   cleric: {
     id: "cleric",
+    pierceAll: true,
     name: "성직자",
     role: "힐러",
     group: "support",
-    hp: 110,
+    // v1.8: 체력 110→120, 평타 8.1→9.5 + 평타 관통
+    hp: 120,
     speed: 70,
-    // v0.7: 공격 속도 0.8배
-    attack: { kind: "proj", dmg: 8.1, cd: 0.525, projKind: "bolt", projSpeed: 190, projLife: 0.9 },
+    attack: { kind: "proj", dmg: 9.5, cd: 0.525, projKind: "bolt", projSpeed: 190, projLife: 0.9 },
     skills: [
       { name: "치유의 빛", desc: "주변 동료 체력 40% 회복", cd: 24, aim: "self", range: 0, radius: 60, unlock: 1 },
       { name: "축복의 방패", desc: "조준점에 가장 가까운 동료에게 보호막 40", cd: 18, aim: "point", range: 160, radius: 60, unlock: 3 },
@@ -192,18 +201,19 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   },
   necro: {
     id: "necro",
+    pierceAll: true,
     name: "네크로맨서",
     role: "저주술사",
     group: "ranged",
-    hp: 95,
+    // v1.8: 체력 95→105, 평타 9→10.5, 공격 속도 0.5→0.45초 + 평타 관통
+    hp: 105,
     speed: 68,
-    // 어둠 구체 (원거리 평타 -10% 적용)
-    attack: { kind: "proj", dmg: 9, cd: 0.5, projKind: "dark", projSpeed: 170, projLife: 1 },
+    attack: { kind: "proj", dmg: 10.5, cd: 0.45, projKind: "dark", projSpeed: 170, projLife: 1 },
     skills: [
       { name: "유령 소환", desc: "15초간 따라다니며 공격하는 유령 1체", cd: 18, aim: "self", range: 0, radius: 20, unlock: 1 },
       { name: "약화 저주", desc: "범위 적이 6초간 받는 피해 +30%", cd: 9, aim: "point", range: 150, radius: 55, unlock: 3 },
       { name: "둔화 저주", desc: "범위 적 4초간 둔화 + 지속 피해", cd: 10, aim: "point", range: 150, radius: 50, unlock: 6 },
-      { name: "죽음의 표식", desc: "화면 안의 저주받은 적 모두에게 높은 피해", cd: 70, aim: "self", range: 0, radius: 300, unlock: 10 },
+      { name: "마물 소환", desc: "이 월드 보스의 미니 버전을 15초간 소환. 마력을 모두 써서 마력 10마다 부하 1마리 추가 (최대 6)", cd: 70, aim: "self", range: 0, radius: 40, unlock: 10 },
       { name: "각성: 망자의 군대", desc: "10초간 유령 4체 소환 + 주변 적 모두 저주", cd: 60, aim: "self", range: 0, radius: 260, unlock: 15 },
     ],
   },

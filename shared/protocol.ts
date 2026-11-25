@@ -137,6 +137,8 @@ export interface SnapPlayer {
   xp: number;
   xpn: number;
   gold: number;
+  /** v1.8 네크로 마력 (본인에게만) */
+  mana?: number;
   shield: number;
   giant: boolean;
   size: number;
@@ -205,9 +207,11 @@ export interface SnapPet {
   x: number;
   y: number;
   /** clone: 꼬마 분신 / spider: 엔지니어 거미 포탑 / laser: 레이저 포탑 */
-  k: "clone" | "spider" | "laser" | "turret" | "drone" | "shadow" | "ghost";
+  k: "clone" | "spider" | "laser" | "turret" | "drone" | "shadow" | "ghost" | "miniboss" | "minion";
   /** 조준 방향 */
   a: number;
+  /** v1.8 네크로 마물·부하의 몬스터 모습 */
+  m?: string;
 }
 
 export type ZoneKind = "fire" | "rain" | "meteor" | "slam" | "ice" | "trap" | "blackhole" | "hammer" | "strike" | "oil" | "discord" | "mine" | "curse";

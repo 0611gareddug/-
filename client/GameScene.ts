@@ -1007,11 +1007,19 @@ export class GameScene extends Phaser.Scene {
           : pt.k === "turret" ? this.add.image(x, y, "pet_turret").setOrigin(0.5, 1)
           : pt.k === "drone" ? this.add.image(x, y, "pet_drone").setOrigin(0.5, 0.5)
           : pt.k === "ghost" ? this.add.image(x, y, "pet_ghost").setOrigin(0.5, 1).setAlpha(0.8)
+          // v1.8 네크로 마물(미니 보스)·부하: 몬스터 모습 + 보랏빛
+          : (pt.k === "miniboss" || pt.k === "minion") && pt.m && MONSTERS[pt.m]
+          ? this.add.image(x, y, `${pt.m}_0`).setOrigin(0.5, 1).setScale(pt.k === "miniboss" ? Math.max(1.2, (MONSTERS[pt.m].scale ?? 1) * 0.5) : 0.9).setAlpha(0.92)
           : this.add.image(x, y, "spider").setOrigin(0.5, 1);
         this.pets.set(pt.id, img);
       }
       if (pt.k === "turret") {
         img.setPosition(Math.round(x), Math.round(y) + 4).setDepth(y).setFlipX(Math.cos(pt.a) < 0);
+      } else if (pt.k === "miniboss" || pt.k === "minion") {
+        if (pt.m && MONSTERS[pt.m]) img.setTexture(`${pt.m}_${Math.floor(now / 220 + pt.id) % 2}`);
+        const fly = pt.m && MONSTERS[pt.m]?.base === "flyer" ? Math.round(Math.sin(now / 160 + pt.id) * 2) - 3 : 0;
+        img.setPosition(Math.round(x), Math.round(y) + 4 + fly).setDepth(y).setFlipX(Math.cos(pt.a) < 0);
+        img.setTint(Math.floor(now / 300 + pt.id) % 2 ? 0xd8b0ff : 0xb080f0);
       } else if (pt.k === "drone" || pt.k === "ghost") {
         img.setPosition(Math.round(x), Math.round(y) + Math.round(Math.sin(now / 200 + pt.id) * 2)).setDepth(y + 40);
       } else if (pt.k === "clone" || pt.k === "shadow") {

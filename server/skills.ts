@@ -53,7 +53,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
         g.fx.push({ k: "line", x: p.x, y: p.y, r: w, pts: [Math.round(ex), Math.round(ey)] });
         for (const m of [...g.monsters]) {
           if (m.spawnT > 0 || hit.has(m.id)) continue;
-          if (distToSegment(m.x, m.y, p.x, p.y, ex, ey) < w + m.r) { hit.add(m.id); g.dealDamage(m, off ? 20 : 35, p, { skill: true }); }
+          if (distToSegment(m.x, m.y, p.x, p.y, ex, ey) < w + m.r) { hit.add(m.id); g.dealDamage(m, off ? 17 : 30, p, { skill: true }); }
         }
       }
       break;
@@ -66,7 +66,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
     // ---------- 궁수 ----------
     case "archer0": {
       const boost = p.stats.rainBoost ? 1.5 : 1;
-      g.addZone("rain", t.x, t.y, def.radius * area * boost, p.id, 8, 2 + (p.stats.rainBoost ? 2 : 0));
+      g.addZone("rain", t.x, t.y, def.radius * area * boost, p.id, 12, 2 + (p.stats.rainBoost ? 2 : 0));
       break;
     }
     case "archer1": {
@@ -78,12 +78,13 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
     case "archer2": {
       g.startDash(p, -Math.cos(t.a), -Math.sin(t.a), 0.15, 220, false);
       for (let i = -2; i <= 2; i++) {
-        g.fireProj(p, "arrow", t.a + i * 0.15, 240, 0.8, 10, { skill: true });
+        // v1.8: 피해 10→13 + 관통
+        g.fireProj(p, "arrow", t.a + i * 0.15, 240, 0.8, 13, { skill: true }).pierceAll = 0;
       }
       break;
     }
     case "archer3": {
-      const pr = g.fireProj(p, "bigarrow", t.a, 320, def.range / 320, 80, { skill: true });
+      const pr = g.fireProj(p, "bigarrow", t.a, 320, def.range / 320, 110, { skill: true }); // v1.8 80→110
       pr.pierce = 999;
       pr.bounce = 0;
       pr.hitR = 10 * area;
@@ -249,7 +250,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
         const x = t.x + Math.cos(a) * d;
         const y = t.y + Math.sin(a) * d;
         if (isWallAt(g.map, x, y)) continue;
-        g.addZone("mine", x, y, 10, p.id, 10, 20);
+        g.addZone("mine", x, y, 10, p.id, 8, 20); // v1.8 지뢰 -20%
       }
       break;
     }
@@ -342,20 +343,10 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
       }
       break;
     }
-    case "necro3": {
-      // 죽음의 표식: 화면 안의 저주받은 적 모두에게 높은 피해
-      const r = def.radius * area;
-      let n = 0;
-      for (const m of [...g.monsters]) {
-        if ((m.curseT ?? 0) <= 0 || Math.hypot(m.x - p.x, m.y - p.y) > r) continue;
-        // v0.9.1: 메테오(60)의 0.6배
-        g.dealDamage(m, 36, p, { skill: true });
-        g.fx.push({ k: "boom", x: Math.round(m.x), y: Math.round(m.y), r: 18 });
-        n++;
-      }
-      if (!n) g.fx.push({ k: "sleep", x: p.x, y: p.y, r: 30 });
+    case "necro3":
+      // v1.8 마물 소환: 이 월드 보스의 미니 버전 15초 + 마력 10마다 부하 1마리 (마력 모두 소모)
+      g.summonFiend(p, 15);
       break;
-    }
 
     // ---------- v1.6 각성기 (5번, Lv15) ----------
     case "warrior4": {
@@ -371,7 +362,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
         let diff = Math.atan2(m.y - p.y, m.x - p.x) - a0;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         if (Math.abs(diff) > 1.15) continue;
-        g.dealDamage(m, 70, p, { skill: true });
+        g.dealDamage(m, 63, p, { skill: true }); // v1.8 70→63
         if (m.kind !== "pvp" && m.kind !== "dummy") m.stunT = Math.max(m.stunT, 1);
       }
       break;
@@ -400,7 +391,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
       break;
     case "engineer4":
       // 궤도 폭격: 1.5초 뒤 큰 폭발
-      g.addZone("meteor", t.x, t.y, def.radius * area, p.id, 90, 1.5);
+      g.addZone("meteor", t.x, t.y, def.radius * area, p.id, 81, 1.5); // v1.8 -10%
       break;
     case "cook4":
       // 만한전석: 6초 동안 주변 회복 + 공속

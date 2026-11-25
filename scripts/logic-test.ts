@@ -673,7 +673,8 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   gv.giveCard(sw, "feather");
   check("카드 고정값: 가벼운 발걸음 2장 = 이속 +14", Math.abs(sw.stats.speedMul * CL9.warrior.speed - (CL9.warrior.speed + 14)) < 0.01);
   check("근접: 검사 체력 170 · v1.4 받는 피해 감소 없음", CL9.warrior.hp === 170 && sw.stats.dmgTakenMul === 1);
-  check("원거리 너프: 궁수 평타 9", CL9.archer.attack.dmg === 9);
+  check("v1.8 원거리 상향: 궁수 평타 13 · 공속 0.3초 · 체력 105", CL9.archer.attack.dmg === 13 && CL9.archer.attack.cd === 0.3 && CL9.archer.hp === 105);
+  check("v1.8 원거리 관통: 궁수·성직자·네크로만", (Object.keys(CL9) as (keyof typeof CL9)[]).filter((c) => CL9[c].pierceAll).sort().join() === "archer,cleric,necro");
 
   // 닌자
   gv.monsters = [];
@@ -706,9 +707,26 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   const hb = c1.hp;
   gv.dealDamage(c1, 10, nc, { raw: true, noCrit: true });
   check("저주받은 적은 받는 피해 +30%", Math.abs((hb - c1.hp) - 13) < 0.01, `${hb - c1.hp}`);
-  const hc1 = c1.hp, hc2 = c2.hp;
+  // v1.8 마력 + 마물 소환
+  nc.mana = 0;
+  const kill1 = gv.spawnMonster("slime", { x: nc.x + 30, y: nc.y })!;
+  kill1.spawnT = 0;
+  gv.dealDamage(kill1, 99999, nc, { raw: true, noCrit: true });
+  check("네크로 처치 → 마력 +1", nc.mana === 1, `${nc.mana}`);
+  nc.mana = 999;
+  for (let i = 0; i < 2; i++) { const k = gv.spawnMonster("slime", { x: nc.x + 30, y: nc.y })!; k.spawnT = 0; gv.dealDamage(k, 99999, nc, { raw: true, noCrit: true }); }
+  check("마력 최대 60", nc.mana === 60, `${nc.mana}`);
+  nc.mana = 37;
   gv.handleCast(3, 3, nc.x, nc.y);
-  check("죽음의 표식: 저주받은 적만 피해 (메테오 0.6배)", c1.hp < hc1 - 30 && c1.hp > hc1 - 60 && c2.hp === hc2, `${hc1 - c1.hp}`);
+  const fiends = GV.pets.filter((p: any) => p.ownerId === 3 && (p.kind === "miniboss" || p.kind === "minion"));
+  check("마물 소환: 월드 보스 미니 버전 1 + 마력 37 → 부하 3, 마력 0", fiends.filter((p: any) => p.kind === "miniboss").length === 1 && fiends.filter((p: any) => p.kind === "minion").length === 3 && nc.mana === 0 && fiends[0].mon === WORLDS[gv.world - 1].boss, `${fiends.length} ${nc.mana}`);
+  nc.mana = 60;
+  nc.cds[3] = 0;
+  gv.handleCast(3, 3, nc.x, nc.y);
+  check("마력 60 → 부하 최대 6 (이전 마물은 사라짐)", GV.pets.filter((p: any) => p.ownerId === 3 && p.kind === "minion").length === 6 && GV.pets.filter((p: any) => p.ownerId === 3 && p.kind === "miniboss").length === 1);
+  const hc1 = c1.hp;
+  for (let i = 0; i < 150; i++) GV.updatePets();
+  check("마물·부하가 적을 공격", c1.hp < hc1, `${hc1 - c1.hp}`);
   gv.handleCast(3, 0, nc.x, nc.y);
   check("네크로 유령 소환", GV.pets.some((p: any) => p.ownerId === 3 && p.kind === "ghost"));
 

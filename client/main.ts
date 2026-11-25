@@ -2,7 +2,7 @@
 import "galmuri/dist/galmuri.css";
 import "./style.css";
 import Phaser from "phaser";
-import { CLASSES, CLASS_IDS, SKILL_UNLOCK, type ClassId } from "../shared/classes";
+import { CLASSES, CLASS_IDS, MANA_MAX, MANA_PER_MINION, MINION_MAX, SKILL_UNLOCK, type ClassId } from "../shared/classes";
 import { CARD_BY_ID, FORGE_PRICE, GACHA_PRICE, RARITY_NAME, canForge } from "../shared/cards";
 import { MARKET_RANGE, PLAYER_COLORS, ROUNDS_PER_WORLD, VIEW_H, VIEW_W } from "../shared/constants";
 import { type SnapMonster, type SnapProj, type SnapshotWire, GEM_GOAL, LOBBY_FIELD_H, LOBBY_FIELD_W, LOBBY_GOAL_HALF, MOD_NAME, PANIC_ZONES, type GachaTier, type LobbyPlayer, type RaceEntry, type ServerMsg, type Snapshot, type StageInfo } from "../shared/protocol";
@@ -452,7 +452,9 @@ function updateHud(s: Snapshot) {
       <div class="bar"><i style="width:${ratio * 100}%;background:${col}"></i></div>
       <div class="muted">HP ${me.hp} / ${me.mhp}${me.shield ? ` <span style="color:var(--accent)">+보호막 ${me.shield}</span>` : ""}</div>
       <div style="display:flex;justify-content:space-between;font-size:11px"><span style="color:var(--legend)">Lv ${me.lv}</span><span class="muted">${me.xp} / ${me.xpn}</span></div>
-      <div class="xpbar"><i style="width:${(me.xp / me.xpn) * 100}%"></i></div>`;
+      <div class="xpbar"><i style="width:${(me.xp / me.xpn) * 100}%"></i></div>${me.mana !== undefined ? `
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px"><span style="color:#c090ff">마력 ${me.mana} / ${MANA_MAX}</span><span class="muted">부하 ${Math.min(MINION_MAX, Math.floor(me.mana / MANA_PER_MINION))}마리</span></div>
+      <div class="xpbar mana"><i style="width:${(me.mana / MANA_MAX) * 100}%"></i></div>` : ""}`;
 
     // 스킬 바
     const bar = $("skill-bar");
@@ -464,6 +466,13 @@ function updateHud(s: Snapshot) {
       const passive = sk.aim === "passive";
       el.className = "skill-slot" + (passive ? " passive" : "") + (locked ? " locked" : !passive && cd <= 0 ? " ready" : "") + (scene?.aiming === i ? " aiming" : "");
       el.innerHTML = `<span class="k">${i + 1}</span><span class="nm">${sk.name}</span>${passive ? '<span class="pv">passive</span>' : ""}`;
+      // v1.8 네크로 마물 소환: 지금 쓰면 나올 부하 수
+      if (me.cls === "necro" && i === 3 && !locked && me.mana !== undefined) {
+        const b = document.createElement("span");
+        b.className = "mana-badge";
+        b.textContent = `+${Math.min(MINION_MAX, Math.floor(me.mana / MANA_PER_MINION))}`;
+        el.append(b);
+      }
       if (passive && !locked) {
         // 패시브는 쿨타임 표시 없음
       } else if (locked) {
