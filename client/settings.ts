@@ -20,6 +20,10 @@ export interface Settings {
   panicFx: boolean;
   /** 감자 모드: 이펙트 대부분 끄기 (저사양 컴퓨터용) */
   potato: boolean;
+  /** v1.9 모바일 스킬 조준: drag 끌어서 조준(떼면 시전, 탭은 자동) / auto 탭하면 가까운 적에게 바로 */
+  touchAim: "drag" | "auto";
+  /** v1.9 모바일 버튼 배치 (버튼 id → 화면 비율 위치 · 크기 · 투명도). 없으면 기본 배치 */
+  touchLayout: Record<string, { x: number; y: number; s: number; o: number }>;
 }
 
 export const KEY_LABEL: Record<KeyAction, string> = {
@@ -47,6 +51,8 @@ const DEFAULTS: Settings = {
   bgmOn: false,
   panicFx: true,
   potato: false,
+  touchAim: "drag",
+  touchLayout: {},
 };
 
 const STORAGE_KEY = "osin-settings";
@@ -54,7 +60,7 @@ const STORAGE_KEY = "osin-settings";
 function load(): Settings {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Partial<Settings>;
-    return { ...DEFAULTS, ...raw, keys: { ...DEFAULTS.keys, ...(raw.keys ?? {}) } };
+    return { ...DEFAULTS, ...raw, keys: { ...DEFAULTS.keys, ...(raw.keys ?? {}) }, touchLayout: { ...(raw.touchLayout ?? {}) } };
   } catch {
     return { ...DEFAULTS, keys: { ...DEFAULTS.keys } };
   }

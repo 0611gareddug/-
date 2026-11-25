@@ -288,28 +288,121 @@ input:focus { border-color: var(--accent); }
 .forge-item.poor .fp { color: var(--danger); }
 .forge-item:not(.done):hover { background: #24232f; }
 
-/* ---------- v1.6 모바일 조작 ---------- */
+/* ---------- v1.9 모바일 조작 (버튼 위치·크기·투명도는 설정의 '버튼 배치 편집') ---------- */
 #touch-ui { display: none; }
 body.touch #touch-ui { display: block; position: fixed; inset: 0; z-index: 8; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; }
-body.touch:not(.in-game) #touch-ui { display: none; }
+body.touch:not(.in-game):not(.tc-editing) #touch-ui { display: none; }
 body.touch .hud-help, body.touch .skill-bar { display: none; }
-.tc-stick { position: absolute; left: 22px; bottom: 26px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(255, 255, 255, 0.25); pointer-events: auto; touch-action: none; }
-.tc-knob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; background: rgba(255, 255, 255, 0.35); border: 2px solid rgba(255, 255, 255, 0.6); }
-.tc-right { position: absolute; right: 16px; bottom: 18px; display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; gap: 8px; align-items: end; }
-.tc-skills { grid-column: 1 / 3; display: flex; gap: 6px; justify-content: flex-end; }
-.tc-btn { pointer-events: auto; touch-action: none; border: 2px solid rgba(255, 255, 255, 0.5); background: rgba(14, 13, 20, 0.6); color: #fff; font: inherit; border-radius: 50%; }
-.tc-btn.on { background: rgba(64, 224, 240, 0.45); }
-.tc-atk { width: 92px; height: 92px; font-size: 16px; }
-.tc-dash { width: 66px; height: 66px; font-size: 13px; }
-.tc-skill { position: relative; width: 52px; height: 52px; border-radius: 12px; font-size: 9px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; line-height: 1.1; }
-.tc-skill b { font-size: 12px; color: var(--legend); font-weight: normal; }
-.tc-skill i { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 18px; background: rgba(0, 0, 0, 0.55); }
+/* 왼쪽 아래: 아무 곳이나 누르면 조이스틱 */
+.tc-zone { position: absolute; left: 0; top: 24%; width: 46%; bottom: 0; pointer-events: auto; touch-action: none; }
+.tc-ctl { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.tc-stick { border-radius: 50%; background: rgba(255, 255, 255, 0.06); border: 2px solid rgba(255, 255, 255, 0.22); }
+.tc-stick.live { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.45); opacity: 1 !important; }
+.tc-knob { position: absolute; left: 50%; top: 50%; width: 44%; height: 44%; margin: -22% 0 0 -22%; border-radius: 50%; background: rgba(255, 255, 255, 0.32); border: 2px solid rgba(255, 255, 255, 0.6); }
+.tc-btn { border: 2px solid rgba(255, 255, 255, 0.45); background: rgba(14, 13, 20, 0.55); color: #fff; font: inherit; border-radius: 50%; padding: 0; }
+.tc-btn.on { background: rgba(64, 224, 240, 0.45); border-color: #9cf4ff; }
+.tc-atk { font-size: 15px; }
+.tc-dash { font-size: 12px; }
+.tc-skill { display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; line-height: 1.05; font-size: 9px; }
+.tc-skill svg { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); transform: rotate(-90deg); pointer-events: none; }
+.tc-skill .ring { fill: none; stroke: #40e0f0; stroke-width: 2.4; stroke-dasharray: 100; stroke-dashoffset: 0; opacity: 0; }
+.tc-skill.cool .ring { opacity: 0.95; stroke: #e84a4a; }
+.tc-skill b { font-size: 11px; color: var(--legend); font-weight: normal; }
+.tc-skill span { max-width: 92%; overflow: hidden; white-space: nowrap; }
+.tc-skill i { position: absolute; inset: 4px; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 17px; background: rgba(0, 0, 0, 0.5); border-radius: 50%; }
 .tc-skill i:empty { display: none; }
-.tc-skill.locked { opacity: 0.4; }
-.tc-skill.passive { border-color: var(--hp); background: rgba(28, 82, 40, 0.7); }
-.tc-top { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: row; gap: 6px; }
-.tc-small { pointer-events: auto; width: 44px; height: 44px; border-radius: 10px; border: 2px solid rgba(255, 255, 255, 0.45); background: rgba(14, 13, 20, 0.6); color: #fff; font: inherit; font-size: 13px; }
+.tc-skill.locked { filter: grayscale(1); opacity: 0.45 !important; }
+.tc-skill.passive { border-color: var(--hp); background: rgba(28, 82, 40, 0.6); }
+.tc-small { border-radius: 10px; border: 2px solid rgba(255, 255, 255, 0.4); background: rgba(14, 13, 20, 0.55); color: #fff; font: inherit; font-size: 12px; padding: 0; }
 .tc-small.on { background: rgba(64, 224, 240, 0.45); }
+/* 끌어서 조준 중: 위쪽 가운데 '취소' 칸 */
+.tc-cancel { display: none; position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 10px 18px; border: 2px dashed rgba(255, 120, 120, 0.8); background: rgba(40, 8, 12, 0.6); color: #ffb0b0; font-size: 12px; border-radius: 10px; }
+#touch-ui.aiming .tc-cancel { display: block; }
+.tc-cancel.hot { background: rgba(200, 40, 50, 0.75); color: #fff; }
+/* 버튼 배치 편집 */
+.tc-editor { display: none; }
+body.tc-editing .tc-editor { display: flex; position: fixed; left: 50%; top: 6px; transform: translateX(-50%); z-index: 60; flex-direction: column; gap: 8px; width: min(360px, 70vw); padding: 12px; background: rgba(21, 20, 28, 0.95); border: 2px solid var(--accent); box-shadow: 0 0 0 2px #000; font-size: 12px; }
+body.tc-editing::before { content: ""; position: fixed; inset: 0; z-index: 7; background: rgba(5, 4, 10, 0.55); background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px); background-size: 24px 24px; }
+body.tc-editing #touch-ui { z-index: 50; }
+body.tc-editing .tc-ctl { outline: 2px dashed rgba(64, 224, 240, 0.6); outline-offset: 2px; }
+body.tc-editing .tc-ctl.sel { outline: 2px solid #f8d040; }
+body.tc-editing .tc-zone { display: none; }
+.tc-editor label { display: flex; align-items: center; gap: 8px; }
+.tc-editor .te-title .muted { display: block; font-size: 10px; }
+/* 편집 창이 가린 버튼을 옮길 수 있게: 창 위치 바꾸기 */
+body.tc-editing.te-bottom .tc-editor { top: auto; bottom: 6px; }
+.tc-editor input[type=range] { flex: 1; }
+.tc-editor .te-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.row-btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+
+/* ---------- v1.9 모바일 HUD: 화면을 덜 가리게 ---------- */
+.bar { position: relative; }
+.bar > em { display: none; }
+body.touch #hud { font-size: 10px; }
+body.touch .hud-me { width: 150px; left: max(8px, env(safe-area-inset-left)); top: 6px; padding: 4px 6px; gap: 2px; pointer-events: auto; opacity: 0.92; }
+body.touch .hud-me .bar { height: 11px; }
+body.touch .hud-me .bar > em { display: block; position: absolute; inset: 0; font-style: normal; font-size: 8px; line-height: 11px; text-align: center; color: #fff; text-shadow: 1px 1px 0 #000; }
+body.touch .hud-me .hm-hp { display: none; }
+body.touch .hud-me:not(.open) .hm-lv { font-size: 9px !important; }
+body.touch .hud-me .xpbar { height: 3px; }
+body.touch .hud-me.open { width: 200px; }
+body.touch .hud-me.open .hm-hp { display: block; }
+body.touch .hud-stage { top: 6px; padding: 2px 8px; font-size: 10px; line-height: 1.35; max-width: 44vw; white-space: normal; }
+body.touch .hud-team { top: auto; bottom: auto; top: 76px; left: max(8px, env(safe-area-inset-left)); width: 110px; gap: 2px; font-size: 9px; }
+body.touch .hud-team .box { padding: 2px 6px; }
+body.touch .hud-cards { display: none; }
+body.touch .hud-msg { bottom: auto; top: 46px; font-size: 10px; padding: 3px 8px; max-width: 60vw; white-space: normal; text-align: center; }
+body.touch .hud-timer { top: 40px; }
+body.touch .side-board { transform: scale(0.8); transform-origin: top right; }
+
+/* ---------- v1.9 모바일 화면 (타이틀 · 로비 · 카드 · 창) ---------- */
+body.touch .screen { justify-content: flex-start; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 10px max(10px, env(safe-area-inset-left)); gap: 10px; }
+body.touch .screen > .panel, body.touch .screen > .menu-panel { margin: auto; }
+body.touch .btn { min-height: 40px; }
+body.touch .btn.tiny { min-height: 32px; }
+body.touch input { font-size: 16px; min-height: 40px; }
+/* 타이틀 */
+body.touch .title-panel { padding: 14px; gap: 8px; }
+body.touch .title-panel .logo { font-size: 30px; }
+@media (max-height: 500px) { body.touch .title-panel .sub { display: none; } body.touch .title-panel .logo { font-size: 24px; } }
+/* 로비: 직업은 가로로 넘기는 큰 카드, 시작 버튼은 아래 고정 */
+body.touch .lobby-panel { width: min(760px, 100%); max-height: none; overflow: visible; padding: 12px; gap: 8px; }
+body.touch .lobby-play { display: none; }
+body.touch .slots { display: flex; gap: 6px; overflow-x: auto; }
+body.touch .slot { min-height: 0; min-width: 84px; padding: 4px; flex-direction: row; gap: 6px; }
+body.touch .slot.empty { display: none; }
+body.solo .slots { display: none; }
+body.touch .classes { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+body.touch .classes > .class-group { flex: 0 0 auto; align-self: stretch; writing-mode: vertical-rl; font-size: 11px; border-bottom: 0; border-left: 1px solid var(--line); padding: 0 2px; margin: 0; }
+body.touch .class-card { flex: 0 0 auto; width: 118px; scroll-snap-align: center; padding: 10px 6px; font-size: 11px; }
+body.touch .class-card canvas { width: 52px; height: 68px; }
+body.touch .class-card b { font-size: 15px; }
+body.touch .lobby-cols { grid-template-columns: 1fr; }
+body.touch .lobby-foot { position: sticky; bottom: -12px; display: flex; gap: 8px; padding: 8px 0 4px; background: var(--panel); z-index: 2; }
+body.touch .lobby-foot .btn { flex: 1; min-height: 48px; font-size: 17px; }
+body.touch .lobby-foot .btn.hidden { display: none; }
+.touch-only { display: none; }
+body.touch .touch-only { display: inline; }
+body.touch .pc-only { display: none; }
+/* 카드 고르기: 가로로 넘기며 크게 */
+body.touch #cards { gap: 8px; }
+body.touch .cards-title { font-size: 15px; text-align: center; }
+body.touch .cards-wrap { width: 100%; }
+body.touch #card-list, body.touch #vote-list, body.touch #relic-list { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scroll-snap-type: x mandatory; padding: 8px max(8px, calc(50% - 120px)); gap: 12px; width: 100%; -webkit-overflow-scrolling: touch; }
+body.touch #card-list .card, body.touch #vote-list .card, body.touch #relic-list .card { flex: 0 0 auto; width: min(240px, 72vw); scroll-snap-align: center; }
+body.touch .card .desc { font-size: 13px; }
+body.touch .card .name { font-size: 16px; }
+@media (max-height: 500px) {
+  body.touch .card { min-height: 0; padding: 10px; gap: 6px; }
+  body.touch .card .icon { width: 52px; height: 52px; }
+  body.touch .card .quote { display: none; }
+}
+/* 창들: 화면 전체를 쓰고 닫기 버튼은 아래 고정 */
+body.touch .market-panel, body.touch .menu-panel, body.touch .result-panel, body.touch .trial-panel { width: 100%; max-height: none; }
+body.touch #btn-market-close, body.touch #btn-gamble-close, body.touch #btn-merchant-close { position: sticky; bottom: -10px; min-height: 48px; z-index: 2; }
+body.touch .market-boxes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+body.touch .forge-list { max-height: none; }
+@media (max-width: 560px) { body.touch .market-boxes { grid-template-columns: 1fr; } }
 
 /* ---------- v1.5 보스 유물 ---------- */
 .r-relic { --c: #ff6040; }

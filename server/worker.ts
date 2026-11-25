@@ -4,9 +4,10 @@
 //  보냄: send(연결 c에 문자열 d) · persist(저장소 JSON)
 import { Hub } from "./room";
 import { exportStore, loadStore, onPersist } from "./store";
+import { ENV } from "./env";
 
 type In =
-  | { k: "init"; store: string | null; code: string; adminHash: string }
+  | { k: "init"; store: string | null; code: string; adminHash: string; env?: Record<string, string> }
   | { k: "open"; c: number }
   | { k: "msg"; c: number; d: string }
   | { k: "close"; c: number };
@@ -18,6 +19,8 @@ self.onmessage = (e: MessageEvent<In>) => {
   const m = e.data;
   if (m.k === "init") {
     loadStore(m.store);
+    // 개발 모드 시험용 시작 지점 (배포 화면에선 메인 스레드가 빈 값을 보냄)
+    Object.assign(ENV, m.env ?? {});
     onPersist(() => post({ k: "persist", store: JSON.stringify(exportStore()) }));
     hub = new Hub(m.code, m.adminHash);
     return;

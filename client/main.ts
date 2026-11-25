@@ -491,6 +491,7 @@ function stopGame() {
 }
 
 // ---------- HUD ----------
+$("hud-me").addEventListener("click", () => $("hud-me").classList.toggle("open"));
 function updateHud(s: Snapshot) {
   lastSnap = s;
   const now = performance.now();
@@ -504,9 +505,9 @@ function updateHud(s: Snapshot) {
     const def = CLASSES[me.cls];
     $("hud-me").innerHTML = `
       <div style="display:flex;justify-content:space-between"><span style="color:${PLAYER_COLORS[me.c]}">${escapeHtml(me.n)} · ${def.name}</span><span class="gold">${me.gold}원</span></div>
-      <div class="bar"><i style="width:${ratio * 100}%;background:${col}"></i></div>
-      <div class="muted">HP ${me.hp} / ${me.mhp}${me.shield ? ` <span style="color:var(--accent)">+보호막 ${me.shield}</span>` : ""}</div>
-      <div style="display:flex;justify-content:space-between;font-size:11px"><span style="color:var(--legend)">Lv ${me.lv}</span><span class="muted">${me.xp} / ${me.xpn}</span></div>
+      <div class="bar hm-hpbar"><i style="width:${ratio * 100}%;background:${col}"></i><em>${me.hp}/${me.mhp}</em></div>
+      <div class="muted hm-hp">HP ${me.hp} / ${me.mhp}${me.shield ? ` <span style="color:var(--accent)">+보호막 ${me.shield}</span>` : ""}</div>
+      <div class="hm-lv" style="display:flex;justify-content:space-between;font-size:11px"><span style="color:var(--legend)">Lv ${me.lv}</span><span class="muted">${me.xp} / ${me.xpn}</span></div>
       <div class="xpbar"><i style="width:${(me.xp / me.xpn) * 100}%"></i></div>${me.mana !== undefined ? `
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px"><span style="color:#c090ff">마력 ${me.mana} / ${MANA_MAX}</span><span class="muted">부하 ${Math.min(MINION_MAX, Math.floor(me.mana / MANA_PER_MINION))}마리</span></div>
       <div class="xpbar mana"><i style="width:${(me.mana / MANA_MAX) * 100}%"></i></div>` : ""}`;
@@ -1021,6 +1022,9 @@ initTouch({
   attack: (on) => { if (scene) scene.touch.atk = on; },
   dash: () => scene?.dashNow(),
   cast: (slot) => scene?.castAuto(slot),
+  aimStart: (slot) => scene?.touchAimStart(slot) ?? false,
+  aimMove: (slot, dx, dy, pull) => scene?.touchAimMove(slot, dx, dy, pull),
+  aimEnd: (slot, fire) => scene?.touchAimEnd(slot, fire),
   interact: () => interact(),
   ready: () => { if (stage?.kind === "rest" && visible("hud")) setRestReady(!restReady); },
   chat: () => setChat(!chatOpen),

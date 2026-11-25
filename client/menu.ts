@@ -9,6 +9,8 @@ import { KEY_LABEL, displayKey, keyName, resetKeys, saveSettings, settings, type
 import { BODIES, CAPES, HATS, RAINBOW, TRAILS, heroSkinCanvas, monsterPalette, paint } from "./sprites";
 import { paintCard } from "./cardArt";
 import { PATCH_NOTES } from "./patchNotes";
+import { isTouchDevice, openTouchEditor, resetTouchLayout } from "./touch";
+import { exportFile, importFile } from "./localStore";
 import { ACHIEVEMENTS, SLOT_NAME, ownedCosmetics, type CosSlot, type Equip, type Reward } from "../shared/achievements";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -515,8 +517,65 @@ function renderSettings(body: HTMLElement) {
   slider("배경음악", "bgmVolume");
   toggle("PANIC 화면 가장자리 붉은 경고·흔들림", "panicFx");
 
+  sec("기록 (이 브라우저에 저장)");
+  {
+    const row = document.createElement("div");
+    row.className = "row-btns";
+    const ex = document.createElement("button");
+    ex.className = "btn small";
+    ex.textContent = "기록 내보내기 (파일)";
+    ex.onclick = () => exportFile();
+    const im = document.createElement("button");
+    im.className = "btn small";
+    im.textContent = "기록 불러오기";
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = "application/json,.json";
+    file.hidden = true;
+    file.onchange = async () => {
+      const f = file.files?.[0];
+      if (f) toast((await importFile(f)) ? "기록을 불러왔어요 (새로 방을 만들면 적용)" : "기록 파일이 아니에요");
+    };
+    im.onclick = () => file.click();
+    row.append(ex, im, file);
+    body.append(row);
+    const note = document.createElement("div");
+    note.className = "muted";
+    note.style.fontSize = "11px";
+    note.textContent = "서버가 없어서 업적·스킨·이어하기·내 기록은 이 브라우저에만 저장돼요. 다른 기기로 옮길 땐 내보내기 → 불러오기.";
+    body.append(note);
+  }
+
   sec("성능");
   toggle("🥔 감자 모드 — 파티클·화면 흔들림·잔상·날씨 등 이펙트 대부분 끄기 (저사양 컴퓨터용)", "potato");
+
+  if (isTouchDevice()) {
+    // v1.9 모바일 조작
+    sec("모바일 조작");
+    for (const [v, label] of [["drag", "끌어서 조준 — 스킬 버튼을 누른 채 끌면 범위가 보이고, 떼면 시전 (그냥 탭하면 가까운 적에게)"], ["auto", "자동 조준 — 탭하면 가까운 적에게 바로 시전"]] as const) {
+      const l = document.createElement("label");
+      l.className = "check";
+      const r = document.createElement("input");
+      r.type = "radio";
+      r.name = "touchAim";
+      r.checked = settings.touchAim === v;
+      r.onchange = () => { settings.touchAim = v; saveSettings(); };
+      l.append(r, document.createTextNode(" " + label));
+      body.append(l);
+    }
+    const row = document.createElement("div");
+    row.className = "row-btns";
+    const edit = document.createElement("button");
+    edit.className = "btn small primary";
+    edit.textContent = "버튼 위치·크기 편집";
+    edit.onclick = () => { toggleMenu(false); openTouchEditor(); };
+    const reset = document.createElement("button");
+    reset.className = "btn small";
+    reset.textContent = "버튼 배치 기본값으로";
+    reset.onclick = () => { resetTouchLayout(); toast("버튼 배치를 기본값으로 되돌렸어요"); };
+    row.append(edit, reset);
+    body.append(row);
+  }
 
   sec("스킬 조준 방식");
   for (const [v, label] of [["hold", "누른 채 클릭하면 시전 (키를 떼면 취소)"], ["instant", "누르면 바로 마우스 위치에 시전"]] as const) {

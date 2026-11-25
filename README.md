@@ -2,24 +2,19 @@
 
 웹 브라우저에서 4~8명이 함께하는 탑다운 협동 로그라이크. 기획은 [../기획서.md](../기획서.md), 카드는 [../카드목록.md](../카드목록.md).
 
-## 실행
+## 실행 (v1.9: 서버 없음)
 
 ```bash
 npm install
 npm run dev
 ```
 
-브라우저에서 http://localhost:5173 접속 → 방 만들기 → "초대 링크 복사"로 친구에게 공유.
-같은 와이파이의 친구는 `http://<내 PC IP>:5173/?room=코드` 로 접속.
+브라우저에서 http://localhost:5173 접속.
+- **혼자 하기**: 서버 없이 내 브라우저에서 바로 (게임 판정은 브라우저의 Web Worker)
+- **같이 하기**: 「방 만들기」를 누른 사람(방장)의 브라우저가 게임을 돌리고, 친구는 초대 링크·방 코드로 P2P(WebRTC) 접속. 처음 연결만 PeerJS 무료 공개 중계 사용. 방장이 나가면 방이 끝남
+- 기록(업적·스킨·이어하기·내 기록·도감)은 각자 브라우저(localStorage)에. 설정 → 기록 내보내기/불러오기
 
-배포용:
-
-```bash
-npm run build
-npm start
-```
-
-(서버 하나가 빌드된 화면과 WebSocket을 함께 서빙, 기본 포트 2567 또는 `PORT`)
+배포: `main`에 올리면 GitHub Actions(`.github/workflows/pages.yml`)가 빌드해서 GitHub Pages에 올림 → [배포방법.md](배포방법.md)
 
 ## 조작
 WASD 이동 · 마우스 조준 / 좌클릭 공격 · Space 대시 · **1~4 누른 채 좌클릭 = 그 위치에 스킬** (키를 떼면 취소) · E 암시장 · Enter 휴게소 준비 완료 · 카드/투표는 클릭 또는 숫자키
@@ -128,17 +123,14 @@ npm run sim
 ```
 아주 강한 테스트 용사 3명으로 8월드 전체를 자동 진행 (모든 몬스터·보스 패턴이 멈추지 않는지 점검).
 
-개발 중 원하는 지점을 빨리 보고 싶으면 환경변수로 지정할 수 있어요 (PowerShell):
-```bash
-$env:START_WORLD='5'; $env:START_ROUND='7'; npm run dev
-```
-`START_WORLD=1~8` 시작 월드, `START_ROUND=7` 이면 바로 보스, `FORCE_EVENT=rest|vote|gambler` 매 라운드 그 이벤트, `FORCE_TRIAL=1` 매 라운드 시련의 방 투표.
-
-친구들과 노는 서버를 켜 둔 채로 테스트하려면 포트·빌드 폴더를 따로 쓰세요: 서버는 `PORT`·`DIST_DIR`·`STORE_FILE`, 개발 화면(vite)은 `GAME_PORT`로 붙일 게임 서버 포트를 지정할 수 있어요.
+개발 중 원하는 지점을 빨리 보고 싶으면 개발 화면 주소에 `env_` 값을 붙이세요 (`npm run dev` 에서만, 배포 화면에선 무시):
+`http://localhost:5173/?env_START_WORLD=9&env_START_ROUND=7` (9월드 보스), `env_START_EVENT=cards|rest|merchant|collapse|puzzle`, `env_FORCE_EVENT=rest|vote`, `env_FORCE_TRIAL=1`.
+로직 테스트·시뮬레이션(`npm test`, `npm run sim`)은 Node에서 같은 이름의 환경변수를 그대로 씀.
 
 ## 구조
 - `shared/` 직업·카드·프로토콜·충돌 (서버/클라이언트 공용)
-- `server/` Node + ws, 서버가 모든 판정(30Hz)
+- `server/` 게임 판정(30Hz) · 방 관리(`room.ts`) · 기록(`store.ts`). v1.9부터 방장 브라우저의 Web Worker(`worker.ts`)에서 돌아감
+- `client/net.ts` 혼자(로컬 워커) / 방장(워커 + PeerJS로 친구 연결) / 참가(PeerJS)
 - `client/` Vite + Phaser 3, 도트 그래픽은 `client/sprites.ts`에서 코드로 생성
 
 ## 아직 없는 것 (다음 단계)

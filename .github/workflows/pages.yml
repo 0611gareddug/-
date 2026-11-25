@@ -1,6 +1,6 @@
-# GitHub Pages: 게임 화면만 Pages에 올리고, 실시간 서버는 Render에 연결
-# (저장소 Settings → Pages → Source 를 "GitHub Actions" 로)
-# 서버 주소를 바꾸려면 Settings → Secrets and variables → Actions → Variables 에 SERVER_URL 추가
+# GitHub Pages: 서버 없이 화면 파일만 배포 (게임 판정은 브라우저 안에서)
+# 처음 한 번: Settings → Pages → Source 를 "GitHub Actions" 로
+# 커맨드 패널: Settings → Secrets and variables → Actions 에 ADMIN_HASH (비밀번호 SHA-256)
 name: GitHub Pages
 
 on:
@@ -27,9 +27,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --include=dev
+      - run: npm run typecheck
+      - run: npm test
       - run: npm run build
         env:
-          VITE_SERVER_URL: ${{ vars.SERVER_URL || 'https://yangbaechu-yongsadan.onrender.com' }}
+          VITE_ADMIN_HASH: ${{ secrets.ADMIN_HASH }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

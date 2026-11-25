@@ -519,6 +519,13 @@ export class Game {
     this.round = Math.max(0, Number(ENV.START_ROUND ?? 1) - 1);
     // 테스트용: START_EVENT=collapse|puzzle|merchant 이면 그 이벤트 방에서 바로 시작
     const se = ENV.START_EVENT;
+    if (se === "cards" || se === "rest") {
+      // 시험용: 카드 고르기 / 휴게소(암시장)에서 바로 시작
+      this.round = 1;
+      if (se === "rest") this.startStage("rest", "market");
+      else { this.startStage("battle"); setTimeout(() => this.openCards(), 1500); }
+      return;
+    }
     if (se === "merchant" || se === "collapse" || se === "puzzle") {
       this.round = 1;
       if (se === "merchant") this.startMerchant();

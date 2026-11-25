@@ -805,6 +805,41 @@ export class GameScene extends Phaser.Scene {
     sfx.cast();
     this.net.send({ t: "cast", slot, x: Math.round(t.x), y: Math.round(t.y) });
   }
+  /** v1.9 모바일 끌어서 조준 (손가락이 움직인 방향·길이로 대상 지점) */
+  touchAim: { slot: number; x: number; y: number } | null = null;
+  touchAimStart(slot: number) {
+    if (this.uiOpen) return false;
+    const me = this.latest()?.players.find((p) => p.id === this.myId);
+    if (!me || me.ghost || me.lv < SKILL_UNLOCK[slot]) return false;
+    const t = this.autoAim();
+    this.touchAim = { slot, x: t.x, y: t.y };
+    return true;
+  }
+  touchAimMove(slot: number, dx: number, dy: number, pull: number) {
+    if (!this.touchAim || this.touchAim.slot !== slot) return;
+    const me = this.latest()?.players.find((p) => p.id === this.myId);
+    if (!me) return;
+    if (!dx && !dy) {
+      // 아직 안 끌었으면 가까운 적
+      const t = this.autoAim();
+      this.touchAim.x = t.x; this.touchAim.y = t.y;
+      return;
+    }
+    const sk = CLASSES[me.cls].skills[slot];
+    const d = Math.hypot(dx, dy) || 1;
+    const reach = sk.aim === "point" ? Math.max(12, sk.range * pull) : Math.max(sk.range, 40);
+    this.touchAim.x = this.local.x + (dx / d) * reach;
+    this.touchAim.y = this.local.y + (dy / d) * reach;
+    this.lastFace = { x: dx / d, y: dy / d };
+  }
+  touchAimEnd(slot: number, fire: boolean) {
+    const t = this.touchAim;
+    this.touchAim = null;
+    if (this.aiming === slot) this.aiming = -1;
+    if (!t || t.slot !== slot || !fire || this.uiOpen) return;
+    sfx.cast();
+    this.net.send({ t: "cast", slot, x: Math.round(t.x), y: Math.round(t.y) });
+  }
   dashNow() {
     if (!this.uiOpen) this.pressDash();
   }
@@ -1007,7 +1042,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.renderWorld(dt);
-    this.drawAim(meSnap, world.x, world.y);
+    if (this.touchAim) {
+      // 모바일 끌어서 조준: 조준 중인 스킬 범위를 손가락 방향으로
+      this.aiming = this.touchAim.slot;
+      this.drawAim(meSnap, this.touchAim.x, this.touchAim.y);
+    } else this.drawAim(meSnap, world.x, world.y);
     this.updateGimmick(dt, latest);
     this.updateMini(latest);
   }

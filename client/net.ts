@@ -83,7 +83,10 @@ export class Net {
       }
     };
     w.onerror = () => this.fail();
-    w.postMessage({ k: "init", store: readStoreRaw(), code: this.code, adminHash: ADMIN_HASH });
+    // 개발 모드에서만: 주소의 ?env_START_WORLD=9 같은 값을 시험용 시작 지점으로
+    const env: Record<string, string> = {};
+    if (import.meta.env.DEV) for (const [k, v] of new URLSearchParams(location.search)) if (k.startsWith("env_")) env[k.slice(4)] = v;
+    w.postMessage({ k: "init", store: readStoreRaw(), code: this.code, adminHash: ADMIN_HASH, env });
     w.postMessage({ k: "open", c: 0 });
     this.markOpen();
     return this.code;
