@@ -1,4 +1,4 @@
-// 8월드 전체를 자동으로 돌려보는 시뮬레이션 (충돌·멈춤 점검용): npx tsx scripts/sim.ts
+// 원정 전체(9월드)를 자동으로 돌려보는 시뮬레이션 (충돌·멈춤 점검용): npx tsx scripts/sim.ts
 import os from "node:os";
 import path from "node:path";
 import type { ServerMsg } from "../shared/protocol";

@@ -277,6 +277,8 @@ export interface Snapshot {
   timer?: number;
   /** 모래폭풍 세기 0~1 */
   storm?: number;
+  /** v1.8 시계탑 시간 왜곡: 1 빠름 · -1 느림 · 2/-2 곧 빨라짐/느려짐 */
+  warp?: number;
   /** 시련의 방 남은 시간 (초) */
   trialT?: number;
   /** 보물방 남은 시간 (초) */
@@ -363,7 +365,9 @@ export interface RecordEntry {
 }
 
 export interface Records {
+  /** 완주 기록. v1.8부터 9월드 완주 (예전 8월드 완주 기록은 total8로 옮겨 보존) */
   total: RecordEntry[];
+  total8?: RecordEntry[];
   worlds: Record<number, RecordEntry[]>;
   /** 무한 하강 최고 층수 */
   descent?: DescentEntry[];

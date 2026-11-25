@@ -45,6 +45,9 @@ export const ACHIEVEMENTS: AchDef[] = [
   { id: "win_normal", name: "보통도 껌", desc: "보통 이상으로 원정 성공", rewards: [cape("silver", "은빛 망토")] },
   { id: "win_hard", name: "어려움 정복", desc: "어려움 이상으로 원정 성공", rewards: [cape("gold", "황금 망토")] },
   { id: "win_hc", name: "진짜 양배추", desc: "하드코어로 원정 성공", rewards: [hat("halo", "신의 후광"), t("real_osin", "진짜 양배추")] },
+  // v1.8 태엽 시계탑
+  { id: "w9", name: "시간의 지배자", desc: "9월드 태엽 시계탑 완주", rewards: [cape("clock", "태엽 망토"), t("timelord", "시간의 지배자")] },
+  { id: "w9_hard", name: "멈추지 않는 시계", desc: "어려움 이상으로 9월드 완주", rewards: [trail("gear", "톱니 발자국")] },
   { id: "flawless", name: "무사고", desc: "한 번도 안 쓰러지고 월드 1개 클리어", rewards: [t("immortal", "불사신")] },
   { id: "medic", name: "부활 전문의", desc: "한 판에 동료 10번 부활", rewards: [cape("cross", "십자 망토")] },
   { id: "cursed", name: "저주받은 용사", desc: "저주 카드 5장 들고 보스 처치", rewards: [trail("skull", "해골 발자국")] },

@@ -59,7 +59,7 @@ interface StoreData {
   profiles: Record<string, Profile>;
 }
 
-const emptyRecords = (): Records => ({ total: [], worlds: {}, descent: [], panic: [] });
+const emptyRecords = (): Records => ({ total: [], total8: [], worlds: {}, descent: [], panic: [] });
 
 let data: StoreData = { saves: [], clears: [], records: {}, codex: {}, profiles: {} };
 
@@ -70,6 +70,10 @@ function normalize(raw: any): StoreData {
     // 예전 형식(normal = 지금의 쉬움)을 옮겨 옴. 예전 하드코어(×1.7)는 기준이 달라 버림
     if (k === "normal") records["1"] = v as Records;
     else if (/^[1-4]$/.test(k)) records[k] = v as Records;
+  }
+  // v1.8: 원정이 9월드가 되어, 예전 8월드 완주 기록은 total8로 옮겨 보존
+  for (const r of Object.values(records)) {
+    if (r.total8 === undefined) { r.total8 = r.total ?? []; r.total = []; }
   }
   return {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -117,7 +117,7 @@ g.dealDamage(slime, 1000, B, { raw: true });
 check("기여도 1위가 돈 전부", B.gold > 0 && A.gold === 0, `A ${A.gold} / B ${B.gold}`);
 
 // ---------- 월드 데이터 ----------
-check("월드 8개", WORLDS.length === 8);
+check("월드 9개 (v1.8 태엽 시계탑)", WORLDS.length === 9 && WORLDS[8].gimmick === "clock" && WORLDS[8].boss === "clock_keeper");
 check("월드 몬스터·보스가 모두 정의됨", WORLDS.every((w) => [...w.monsters, w.boss].every((id) => !!MONSTERS[id])));
 check("보스 소환 몬스터가 모두 정의됨", Object.values(MONSTERS).every((m) => !m.boss?.summon || !!MONSTERS[m.boss.summon]));
 
@@ -1025,7 +1025,7 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   const { WORLDS: W14, worldDmgMul: wdm } = await import("../shared/worlds");
   check("월드마다 세 번째 잡몹이 정의됨", W14.every((w) => !!MONSTERS[w.extra]));
   check("챕터별 몬스터 피해 상향 (8월드 약 6배)", wdm(8) > 5.5 && wdm(1) === 1, `${wdm(8).toFixed(2)}`);
-  const sig: Record<string, string> = { king_slime: "bounce", pharaoh: "sandwall", yeti: "avalanche", flower_queen: "garden", thunder_eagle: "boltline", demon_lord: "hellfire", ghost_captain: "phantom", prank_god: "judgment" };
+  const sig: Record<string, string> = { king_slime: "bounce", pharaoh: "sandwall", yeti: "avalanche", flower_queen: "garden", thunder_eagle: "boltline", demon_lord: "hellfire", ghost_captain: "phantom", prank_god: "judgment", clock_keeper: "clockhands" };
   check("보스마다 고유 패턴", W14.every((w) => MONSTERS[w.boss].boss!.abilities.includes(sig[w.boss] as any)));
   const gb = new Game([{ id: 1, name: "B", color: 0, cls: "warrior" }, { id: 2, name: "C", color: 1, cls: "mage" }], () => {}, () => {}, () => {});
   const GB = gb as any;
@@ -1231,6 +1231,83 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   const before = sent17.length;
   (gc17 as any).sendResults();
   check("커맨드 쓴 판은 숙련도 없음", !sent17.slice(before).some((m) => m.t === "mastery"));
+}
+
+// ---------- v1.8: 태엽 시계탑 · 원거리 관통 ----------
+{
+  const g9 = new Game([{ id: 1, name: "Clock", color: 0, cls: "archer" }], () => {}, () => {}, () => {});
+  const G9 = g9 as any;
+  const ap = g9.players.get(1)!;
+  ap.god = true;
+  G9.world = 9;
+  G9.startStage("battle");
+  check("9월드 전투: 시계탑 잡몹 등장", g9.monsters.some((m) => m.kind === "clock_soldier") && g9.monsters.some((m) => m.kind === "gear_bat"));
+  G9.phase = "play";
+  G9.warpClock = 20.5;
+  G9.updateGimmick();
+  check("시간 왜곡: 첫 왜곡은 느린 시간 (×0.7)", G9.warpState() === -1 && G9.warpMul === 0.7);
+  G9.warpClock = 27 + 20.5;
+  G9.updateGimmick();
+  check("시간 왜곡: 다음은 빠른 시간 (×1.3)", G9.warpState() === 1 && G9.warpMul === 1.3);
+  G9.warpClock = 18.5;
+  check("시간 왜곡: 2초 전 경고", G9.warpState() === -2);
+  // 톱니 함정
+  ap.god = false; ap.invulnT = 0;
+  const tiles = G9.map.tiles as string;
+  const idx = tiles.indexOf("*");
+  check("9월드 맵에 톱니 함정", idx >= 0);
+  if (idx >= 0) {
+    ap.x = (idx % G9.map.w) * 16 + 8; ap.y = Math.floor(idx / G9.map.w) * 16 + 8;
+    ap.hp = ap.stats.maxHp; ap.gearCd = 0;
+    G9.monsters = [];
+    G9.updatePlayer(ap);
+    check("톱니 함정 위: 최대 체력 4% 피해", Math.abs(ap.stats.maxHp - ap.hp - ap.stats.maxHp * 0.04) < 0.5, `${ap.stats.maxHp - ap.hp}`);
+  }
+  ap.god = true;
+  // 보스 패턴
+  G9.startStage("boss");
+  G9.introT = 0;
+  const boss = g9.monsters.find((m) => m.kind === "clock_keeper")!;
+  check("시계탑의 수호자 등장", !!boss);
+  const z0 = g9.zones.length;
+  G9.bossAbility(boss, "clockhands", ap, false);
+  check("시침·분침: 회전 빛줄기 예고", g9.zones.length - z0 >= 20 && g9.zones.every((z) => z.kind === "strike"));
+  G9.bossAbility(boss, "clockhands", ap, true);
+  const bx = boss.x;
+  G9.bossAbility(boss, "rewind", ap, false);
+  if (boss.rwT !== undefined) {
+    for (let i = 0; i < 80; i++) G9.updateVolleys(boss, ap);
+    check("되감기: 원래 자리로 돌아옴", Math.abs(boss.x - bx) < 0.01 && boss.rwT === undefined);
+  }
+  const p0 = g9.projs.length;
+  G9.bossAbility(boss, "timestop", ap, false);
+  for (let i = 0; i < 31; i++) G9.updateVolleys(boss, ap);
+  const held = g9.projs.slice(p0).filter((pr: any) => pr.holdT > 0);
+  check("시간 정지: 멈춘 톱니 탄막이 생김", held.length > 20, `${held.length}`);
+  const hx = held[0]?.x;
+  G9.updateProjs();
+  check("시간 정지 중엔 탄이 안 움직임", held[0]?.x === hx);
+  // 9월드 완주 = 게임 승리, 8월드는 계속
+  const g8 = new Game([{ id: 1, name: "W8", color: 0, cls: "warrior" }], () => {}, () => {}, () => {});
+  const G8 = g8 as any;
+  G8.world = 8;
+  G8.clearWorld();
+  check("8월드 클리어 → 끝나지 않고 9월드로 (원정 성공 업적은 그대로)", G8.phase === "rest" && !G8.won);
+
+  // 원거리 관통: 일렬로 선 적 3마리를 모두 꿰뚫음 (-10%씩)
+  const gp = new Game([{ id: 1, name: "Pierce", color: 0, cls: "archer" }], () => {}, () => {}, () => {});
+  const GP = gp as any;
+  const pa = gp.players.get(1)!;
+  pa.stats.critChance = 0;
+  gp.monsters = [];
+  GP.portalOpen = false;
+  const line = [40, 60, 80].map((dx) => { const m = gp.spawnMonster("dummy", { x: pa.x + dx, y: pa.y })!; m.spawnT = 0; return m; });
+  const pr = gp.fireProj(pa, "arrow", 0, 230, 0.9, 10, { onHit: true });
+  pr.pierceAll = 0;
+  GP.buildGrid();
+  for (let i = 0; i < 20; i++) GP.updateProjs();
+  check("관통 무제한: 3마리 모두 맞음", line.every((m) => m.total > 0), line.map((m) => m.total).join(","));
+  check("관통할수록 -10%", line[1].total < line[0].total && line[2].total < line[1].total);
 }
 
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");

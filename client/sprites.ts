@@ -243,6 +243,7 @@ export const CAPES: Record<string, string> = {
   gold: "#f0c040",
   abyss: "#4a2a70",
   warning: "#f0a020",
+  clock: "#b08838",
 };
 export const RAINBOW = ["#e84a4a", "#f0904a", "#f0c040", "#50d890", "#4aa0f0", "#a070f0"];
 
@@ -285,6 +286,7 @@ export const TRAILS: Record<string, number[]> = {
   lightning: [0xfff060, 0x40e0f0],
   rainbow: [0xe84a4a, 0xf0c040, 0x50d890, 0x4aa0f0, 0xa070f0],
   spark: [0xff3a20, 0xf08030, 0xffe060],
+  gear: [0xc89a48, 0xfff0b0, 0x8a6a3a],
 };
 
 // 엔지니어 거미 포탑 (g = 눈 렌즈 색)
@@ -603,6 +605,8 @@ export const PROJ: Record<string, { rows: string[]; pal: Palette }> = {
   fire: { rows: [".ff.", "fFYf", "fYYf", ".ff."], pal: { f: "#c03020", F: "#f08030", Y: "#fff060" } },
   spirit: { rows: [".cc.", "cWWc", "cWWc", ".cc."], pal: { c: "#40e0d0", W: "#e0fff8" } },
   light: { rows: ["..y..", ".yWy.", "yWWWy", ".yWy.", "..y.."], pal: { y: "#f0c040", W: "#ffffff" } },
+  // v1.8 톱니 탄
+  gear: { rows: [".g.g.", "gGGGg", ".GoG.", "gGGGg", ".g.g."], pal: { g: "#8a6a3a", G: "#e0b050", o: "#2a1e14" } },
 };
 
 export const FLAME = [
@@ -913,6 +917,29 @@ export function specialTile(ch: string, seed: number): HTMLCanvasElement {
       ctx.fillStyle = "#6a88d0";
       ctx.fillRect(0, 0, TILE, 6);
       dots(["#ffffff", "#c8d8f8"], 4, 2);
+      break;
+    }
+    case "*": {
+      // v1.8 톱니 함정: 금속 판 위 톱니바퀴
+      ctx.fillStyle = "#4a4048";
+      ctx.fillRect(0, 0, TILE, TILE);
+      ctx.fillStyle = "#5e5460";
+      ctx.fillRect(0, 0, TILE, 1);
+      ctx.fillRect(0, 0, 1, TILE);
+      const cx = 8, cy = 8;
+      const rot = r() * Math.PI;
+      ctx.fillStyle = "#a07838";
+      for (let k = 0; k < 8; k++) {
+        const a = rot + (k / 8) * Math.PI * 2;
+        ctx.fillRect(Math.round(cx + Math.cos(a) * 6) - 1, Math.round(cy + Math.sin(a) * 6) - 1, 2, 2);
+      }
+      ctx.fillStyle = "#c89a48";
+      for (let y = -4; y <= 4; y++) for (let x = -4; x <= 4; x++) if (x * x + y * y <= 20) ctx.fillRect(cx + x, cy + y, 1, 1);
+      ctx.fillStyle = "#f0d080";
+      ctx.fillRect(cx - 3, cy - 4, 3, 1);
+      ctx.fillStyle = "#2a1e14";
+      ctx.fillRect(cx - 1, cy - 1, 2, 2);
+      dots(["#e84a4a"], 2);
       break;
     }
     case "=":

@@ -225,6 +225,10 @@ export class GameScene extends Phaser.Scene {
   /** 월드 기믹 화면 효과 (카메라 고정 레이어) */
   private overlay: Phaser.GameObjects.Rectangle | null = null;
   private fog: Phaser.GameObjects.RenderTexture | null = null;
+  /** v1.8 시계탑 시간 왜곡 시계 표시 */
+  private clockG: Phaser.GameObjects.Graphics | null = null;
+  private clockTxt: Phaser.GameObjects.Text | null = null;
+  private clockHand = 0;
   private weather: { o: Phaser.GameObjects.Rectangle; vx: number; vy: number }[] = [];
   private gimmick = "none";
   private gemImg!: Phaser.GameObjects.Image;
@@ -418,7 +422,7 @@ export class GameScene extends Phaser.Scene {
         const seed = x * 73 + y * 151 + st.round * 977 + st.world * 31;
         let img: HTMLCanvasElement;
         if (ch === "#") img = wallTile(!wall(x, y + 1), seed, wd);
-        else if ("~_%v=".includes(ch)) img = specialTile(ch, seed);
+        else if ("~_%v=*".includes(ch)) img = specialTile(ch, seed);
         else img = floorTile(ch === "," ? 1 : ch === '"' ? 2 : 0, seed, wd);
         ctx.drawImage(img, x * TILE, y * TILE);
         if (ch !== "#" && wall(x, y - 1)) {
@@ -523,6 +527,10 @@ export class GameScene extends Phaser.Scene {
     this.fog = null;
     for (const w of this.weather) w.o.destroy();
     this.weather = [];
+    this.clockG?.destroy();
+    this.clockG = null;
+    this.clockTxt?.destroy();
+    this.clockTxt = null;
     // 감자 모드: 날씨 입자 없음 (모래폭풍 어두워짐만)
     const potato = settings.potato;
     if (g === "sandstorm") {
@@ -543,13 +551,24 @@ export class GameScene extends Phaser.Scene {
       }
     } else if (g === "fog") {
       this.fog = this.add.renderTexture(0, 0, VIEW_W, VIEW_H).setOrigin(0).setScrollFactor(0).setDepth(200000);
+    } else if (g === "clock") {
+      // v1.8 시계탑: 시간 왜곡 색 + 떠다니는 황동 먼지 + 큰 시계
+      this.overlay = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0x4060c0, 0).setOrigin(0).setScrollFactor(0).setDepth(200000);
+      for (let i = 0; i < (potato ? 0 : 36); i++) {
+        const o = this.add.rectangle(Math.random() * VIEW_W, Math.random() * VIEW_H, 1, 1, i % 3 ? 0xc89a48 : 0xfff0b0, 0.7).setScrollFactor(0).setDepth(200001);
+        this.weather.push({ o, vx: -6 + Math.random() * 12, vy: -(4 + Math.random() * 8) });
+      }
+      this.clockG = this.add.graphics().setScrollFactor(0).setDepth(200002);
+      this.clockTxt = this.add.text(VIEW_W / 2, 50, "", { ...TEXT_STYLE, fontSize: "8px", align: "center" }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(200002);
     }
   }
 
   private updateGimmick(dt: number, s: Snapshot) {
+    const warp = this.gimmick === "clock" ? s.warp ?? 0 : 0;
+    const wmul = warp === 1 ? 3 : warp === -1 ? 0.25 : 1;
     for (const w of this.weather) {
-      w.o.x += w.vx * dt;
-      w.o.y += w.vy * dt;
+      w.o.x += w.vx * dt * wmul;
+      w.o.y += w.vy * dt * wmul;
       if (w.o.x > VIEW_W) w.o.x -= VIEW_W;
       if (w.o.x < 0) w.o.x += VIEW_W;
       if (w.o.y > VIEW_H) w.o.y -= VIEW_H;
@@ -559,6 +578,31 @@ export class GameScene extends Phaser.Scene {
       const storm = s.storm ?? 0;
       this.overlay?.setFillStyle(0xc8a060, storm * 0.6);
       for (const w of this.weather) w.o.setAlpha(0.2 + storm * 0.8);
+    }
+    if (this.gimmick === "clock" && this.clockG && this.clockTxt) {
+      const now = performance.now();
+      const blink = Math.floor(now / 200) % 2 === 0;
+      const col = warp === 1 || warp === 2 ? 0xf08030 : 0x4a80f0;
+      const a = warp === 1 ? 0.13 : warp === -1 ? 0.2 : warp ? (blink ? 0.08 : 0) : 0;
+      this.overlay?.setFillStyle(col, a);
+      // 시계 바늘: 빠름이면 빙글빙글, 느림이면 아주 천천히
+      this.clockHand += dt * (warp === 1 ? 14 : warp === -1 ? 0.4 : 2);
+      const g = this.clockG;
+      g.clear();
+      if (warp) {
+        const cx = VIEW_W / 2, cy = 34, r = 13;
+        g.fillStyle(0x1a1420, 0.85).fillCircle(cx, cy, r + 2);
+        g.fillStyle(warp === 1 || warp === 2 ? 0xf0b060 : 0x9cc0ff, 1).fillCircle(cx, cy, r);
+        g.fillStyle(0xfff4d0, 1).fillCircle(cx, cy, r - 2);
+        for (let k = 0; k < 12; k++) {
+          const ang = (k / 12) * Math.PI * 2;
+          g.fillStyle(0x3a2a1a, 1).fillRect(Math.round(cx + Math.cos(ang) * (r - 4)), Math.round(cy + Math.sin(ang) * (r - 4)), 1, 1);
+        }
+        g.lineStyle(2, 0x2a1e14, 1).lineBetween(cx, cy, cx + Math.cos(this.clockHand / 12) * 6, cy + Math.sin(this.clockHand / 12) * 6);
+        g.lineStyle(1, 0xc03020, 1).lineBetween(cx, cy, cx + Math.cos(this.clockHand) * 9, cy + Math.sin(this.clockHand) * 9);
+        this.clockTxt.setText(warp === 1 ? "빠른 시간! (모두 +30%)" : warp === -1 ? "느린 시간… (모두 -30%)" : warp === 2 ? "곧 빨라져요" : "곧 느려져요");
+        this.clockTxt.setColor(warp === 1 || warp === 2 ? "#ffc080" : "#a8c8ff").setVisible(warp === 1 || warp === -1 || blink);
+      } else this.clockTxt.setVisible(false);
     }
     if (this.fog) {
       // 짙은 안개: 살아있는 용사 주변만 보임

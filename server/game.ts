@@ -43,6 +43,8 @@ export interface Player extends Participant {
   mana?: number;
   /** 구멍 낙하 피해 쿨타임 */
   fallCd?: number;
+  /** v1.8 톱니 함정 피해 쿨타임 */
+  gearCd?: number;
   /** 커맨드 관전·투명 모드 */
   spec?: boolean;
   /** 엔지니어 거대 로봇 / 수리 드론 */
@@ -168,6 +170,11 @@ export interface Monster {
   jumpY?: number;
   wallN?: number;
   wallT?: number;
+  /** v1.8 시계탑의 수호자: 되감기(돌아올 자리·남은 시간) / 시간 정지 탄막 준비 */
+  rwT?: number;
+  rwX?: number;
+  rwY?: number;
+  tsT?: number;
   /** v1.0 새 패턴: 자폭 심지 · 바라보는 방향 · 연속 사격 · 나선 탄막 · 소환한 주인 · 광폭화 연출 */
   fuseT?: number;
   faceA?: number;
@@ -248,6 +255,8 @@ export interface Proj {
   hops?: number;
   /** 닌자 특성 '부메랑': 끝에서 되돌아옴 */
   boomer?: boolean;
+  /** v1.8 시간 정지 탄막: 이 시간 동안 멈춰 있다가 날아감 */
+  holdT?: number;
   /** v1.8 원거리 평타 관통 무제한: 지금까지 뚫은 수 (뚫을 때마다 피해 -10%, 최저 50%) */
   pierceAll?: number;
   hit: Set<number>;
@@ -387,6 +396,9 @@ export class Game {
   private prankClock = 0;
   private prankFastT = 0;
   private prankRevT = 0;
+  /** v1.8 시계탑 시간 왜곡: 주기 시계 / 지금 배율 (1 보통, 0.7 느림, 1.3 빠름) */
+  private warpClock = 0;
+  private warpMul = 1;
   private mode: RoomMode;
   private gemMode = false;
   /** 무한 하강 */
@@ -894,6 +906,8 @@ export class Game {
     this.prankClock = 0;
     this.prankFastT = 0;
     this.prankRevT = 0;
+    this.warpClock = 0;
+    this.warpMul = 1;
     const wd = this.worldDef;
 
     let mapName = wd.name;
@@ -995,7 +1009,7 @@ export class Game {
         for (let k = 0; k < Math.round(main * countMul); k++) this.spawnMonster(wd.monsters[0]);
         for (let k = 0; k < Math.round(second * countMul); k++) this.spawnMonster(wd.monsters[1]);
         // v1.4 월드별 세 번째 잡몹 (들쥐는 떼로)
-        const third = Math.round((r >= 2 ? 1 + r * 0.6 : 0.6) * countMul) * (wd.extra === "field_rat" ? 2 : 1);
+        const third = Math.round((r >= 2 ? 1 + r * 0.6 : 0.6) * countMul) * (wd.extra === "field_rat" || wd.extra === "gear_bat" ? 2 : 1);
         for (let k = 0; k < third; k++) this.spawnMonster(wd.extra);
         // v1.0 특수 몬스터 (자폭 · 방패 · 소환 · 탄막)
         const specials = specialMonsters(this.world);
@@ -1182,12 +1196,17 @@ export class Game {
     }
     if (this.world === 1 && this.mode.speedrun && this.runTime < 180) this.achAll("speed_w1");
 
-    if (this.world >= WORLD_COUNT) {
+    // 8월드(신들의 정원)를 깨면 예전처럼 원정 성공 업적 + 하드코어 해금. v1.8부터는 9월드(시계탑)까지 이어짐
+    if (this.world === 8) {
       if (!this.cmdUsed) addClears(names);
       this.achAll("win");
       if (this.mode.diff >= 2) this.achAll("win_normal");
       if (this.mode.diff >= 3) this.achAll("win_hard");
       if (this.mode.diff >= 4) this.achAll("win_hc");
+    }
+    if (this.world >= WORLD_COUNT) {
+      this.achAll("w9");
+      if (this.mode.diff >= 3) this.achAll("w9_hard");
       this.finish(true);
       return;
     }
@@ -2258,6 +2277,14 @@ export class Game {
     this.prankFastT -= DT;
     this.prankRevT -= DT;
     if (g === "sandstorm") this.stormClock += DT;
+    if (g === "clock" && this.phase === "play") {
+      // v1.8 시간 왜곡: 27초 주기 = 보통 20초 → 왜곡 7초 (느림 / 빠름 번갈아). 2초 전에 경고
+      const prev = this.warpState();
+      this.warpClock += DT;
+      const now = this.warpState();
+      this.warpMul = now === 1 ? 1.3 : now === -1 ? 0.7 : 1;
+      if (now !== prev && (now === 2 || now === -2)) this.broadcast({ t: "toast", msg: now === 2 ? "⏱ 곧 시간이 빨라져요!" : "⏱ 곧 시간이 느려져요!" });
+    } else this.warpMul = 1;
     if (g === "prank") {
       this.prankClock += DT;
       if (this.prankClock >= 25) {
@@ -2276,6 +2303,17 @@ export class Game {
         if (pr.id === "heal") for (const m of this.monsters) m.hp = Math.min(m.mhp, m.hp + m.mhp * 0.2);
       }
     }
+  }
+
+  /** 시간 왜곡 상태: 0 보통 · 1 빠름 · -1 느림 · 2/-2 곧 빨라짐/느려짐 (경고) */
+  warpState(): number {
+    if (this.worldDef?.gimmick !== "clock" || this.phase === "rest") return 0;
+    const cycle = Math.floor(this.warpClock / 27);
+    const t = this.warpClock % 27;
+    const sign = cycle % 2 === 0 ? -1 : 1;
+    if (t >= 20) return sign;
+    if (t >= 18) return sign * 2;
+    return 0;
   }
 
   private stormLevel() {
@@ -2445,6 +2483,16 @@ export class Game {
       }
       if (tile === "%") p.poisonT = Math.max(p.poisonT, 1);
       if (tile === "=") p.burnT = Math.max(p.burnT, 1.5);
+      // v1.8 톱니 함정: 0.5초마다 최대 체력 4% + 살짝 밀려남
+      if (tile === "*") {
+        p.gearCd = (p.gearCd ?? 0) - DT;
+        if (p.gearCd <= 0) {
+          p.gearCd = 0.5;
+          this.tickDamage(p, p.stats.maxHp * 0.04);
+          p.flashT = 0.1;
+          this.fx.push({ k: "hit", x: Math.round(p.x), y: Math.round(p.y) });
+        }
+      }
     }
 
     // 대시
@@ -2504,6 +2552,7 @@ export class Game {
       if (tile === "~") speed *= 0.6;
       if (tile === "%") speed *= 0.8;
       if (this.prankFastT > 0) speed *= 1.4;
+      speed *= this.warpMul;
       if (this.gem.holder === p.id) speed *= 0.85;
       const tx = mx * speed;
       const ty = my * speed;
@@ -3017,7 +3066,7 @@ export class Game {
     const uy = dy / dist;
     const canMove = m.rootT <= 0;
     const enraged = (!!def.boss || m.elite === "rage") && m.hp < m.mhp / 2;
-    const spd = m.speed * (m.slowT > 0 ? 0.5 : 1) * (enraged ? (m.elite === "rage" ? 1.7 : 1.3) : 1) * (this.mod === "fast" ? 1.4 : 1);
+    const spd = m.speed * (m.slowT > 0 ? 0.5 : 1) * (enraged ? (m.elite === "rage" ? 1.7 : 1.3) : 1) * (this.mod === "fast" ? 1.4 : 1) * this.warpMul;
     // 엘리트 순간이동: 가끔 대상 뒤로
     if (m.elite === "blink") {
       m.blinkCd -= DT;
@@ -3347,6 +3396,44 @@ export class Game {
         }
         break;
       }
+      // ---------- v1.8 시계탑의 수호자 ----------
+      case "clockhands": {
+        // 시침·분침: 보스 중심으로 회전하며 차례로 내려치는 빛줄기 (광폭화면 두 바늘)
+        m.busyT = 1.4;
+        const a0 = Math.atan2(target.y - m.y, target.x - m.x) - Math.PI / 2;
+        const hands = enraged ? [0, Math.PI] : [0];
+        const dir = Math.random() < 0.5 ? 1 : -1;
+        for (const h of hands) {
+          for (let step = 0; step < 10; step++) {
+            const a = a0 + h + dir * step * (Math.PI / 5);
+            for (let i = 1; i <= 7; i++) {
+              const x = m.x + Math.cos(a) * i * 22, y = m.y + Math.sin(a) * i * 22;
+              if (isWallAt(this.map, x, y)) break;
+              this.addZone("strike", x, y, 12, m.id, m.dmg * 1.2, 0.9 + step * 0.14);
+            }
+          }
+        }
+        break;
+      }
+      case "rewind": {
+        // 되감기: 대상 옆으로 순간이동 → 2.4초 뒤 원래 자리로 되돌아가며 두 곳에 충격파
+        const to = randomFloorPoint(this.map, target, 50);
+        if (Math.hypot(to.x - target.x, to.y - target.y) > 120 || isWallAt(this.map, to.x, to.y)) break;
+        m.rwX = m.x; m.rwY = m.y; m.rwT = 2.4;
+        this.fx.push({ k: "blink", x: Math.round(m.x), y: Math.round(m.y), pts: [Math.round(to.x), Math.round(to.y)] });
+        this.addZone("slam", m.x, m.y, 56, m.id, m.dmg * 1.4, 2.4);
+        m.x = to.x; m.y = to.y;
+        this.addZone("slam", to.x, to.y, 50, m.id, m.dmg * 1.3, 2.4);
+        m.busyT = 0.6;
+        break;
+      }
+      case "timestop":
+        // 시간 정지: 경고 후 둘레에 멈춘 톱니 탄막 → 잠시 뒤 한꺼번에 날아감
+        m.tsT = 1;
+        m.busyT = 2.2;
+        this.broadcast({ t: "toast", msg: "⏱ 시간 정지!" });
+        this.fx.push({ k: "awaken", x: Math.round(m.x), y: Math.round(m.y), r: 70 });
+        break;
       case "spiral":
         // 나선 탄막 2.5초
         m.spiralT = 2.5;
@@ -3478,6 +3565,33 @@ export class Game {
         }
       }
     }
+    if (m.rwT !== undefined) {
+      m.rwT -= DT;
+      if (m.rwT <= 0) {
+        this.fx.push({ k: "blink", x: Math.round(m.x), y: Math.round(m.y), pts: [Math.round(m.rwX ?? m.x), Math.round(m.rwY ?? m.y)] });
+        m.x = m.rwX ?? m.x; m.y = m.rwY ?? m.y;
+        m.rwT = undefined;
+      }
+    }
+    if (m.tsT !== undefined) {
+      m.tsT -= DT;
+      if (m.tsT <= 0) {
+        m.tsT = undefined;
+        // 두 겹의 톱니 고리가 멈춰 있다가 0.9초 / 1.3초 뒤 날아감
+        const enraged = m.hp < m.mhp * 0.5;
+        for (const [rad, n, hold] of [[50, 14, 0.9], [90, 22, 1.3]] as const) {
+          const off = Math.random() * Math.PI;
+          for (let i = 0; i < n; i++) {
+            const a = off + (i / n) * Math.PI * 2;
+            this.monsterShot(m, a, "gear", enraged ? 120 : 100);
+            const pr = this.projs[this.projs.length - 1];
+            pr.x = m.x + Math.cos(a) * rad; pr.y = m.y + Math.sin(a) * rad;
+            if (isWallAt(this.map, pr.x, pr.y)) { this.projs.pop(); continue; }
+            pr.holdT = hold;
+          }
+        }
+      }
+    }
     if (m.wallN && m.wallN > 0) {
       m.wallT = (m.wallT ?? 0) - DT;
       if (m.wallT <= 0) {
@@ -3570,6 +3684,19 @@ export class Game {
   private updateProjs() {
     const keep: Proj[] = [];
     for (const pr of this.projs) {
+      if (pr.holdT !== undefined && pr.holdT > 0) {
+        // 시간 정지: 제자리에 멈춘 탄 (닿으면 맞음)
+        pr.holdT -= DT;
+        let hitP = false;
+        for (const p of this.players.values()) {
+          if (p.ghost || Math.hypot(p.x - pr.x, p.y - pr.y) > this.hitRadius(p) + pr.hitR) continue;
+          this.hurtPlayer(p, pr.dmg);
+          hitP = true;
+          break;
+        }
+        if (!hitP) keep.push(pr);
+        continue;
+      }
       pr.life -= DT;
       const sx = pr.vx * DT, sy = pr.vy * DT;
       pr.traveled += Math.hypot(sx, sy);
@@ -4110,7 +4237,7 @@ export class Game {
           ghost: p.ghost, rv: Math.round(p.reviveProg * 100) / 100,
           a: Math.round(p.aim * 100) / 100,
           dash: p.dashT > 0, dc: p.dashLeft, f: p.flashT > 0, at: p.atkAnimT > 0,
-          spd: CLASSES[p.cls].speed * p.stats.speedMul * (p.slowT > 0 ? 0.6 : 1) * (this.prankFastT > 0 ? 1.4 : 1) * (this.gem.holder === p.id ? 0.85 : 1),
+          spd: CLASSES[p.cls].speed * p.stats.speedMul * (p.slowT > 0 ? 0.6 : 1) * (this.prankFastT > 0 ? 1.4 : 1) * this.warpMul * (this.gem.holder === p.id ? 0.85 : 1),
           cds: p.cds.map((c) => Math.round(c * 10) / 10),
           cdm: ((c) => (this.changed(this.sentCdm, p.id, c.join(","), full) ? c : undefined))(CLASSES[p.cls].skills.map((s, i) => (this.isRest ? 0.3 : Math.round(skillCd(s.cd, p.stats, i) * 10) / 10))),
           lv: p.level, xp: Math.floor(p.xp), xpn: xpToNext(p.level), gold: p.gold,
@@ -4136,6 +4263,7 @@ export class Game {
       scores: this.gemMode ? Object.fromEntries([...this.players.values()].map((p) => [p.id, Math.floor(p.score)])) : undefined,
       timer: this.mode.speedrun ? Math.round(this.runTime * 10) / 10 : undefined,
       storm: this.stormLevel() || undefined,
+      warp: this.warpState() || undefined,
       trialT: this.stageKind === "trial" && this.phase === "play" ? Math.max(0, Math.ceil(this.trialT)) : undefined,
       treasureT: this.stageKind === "treasure" && this.phase === "play" ? Math.max(0, Math.ceil(this.treasureT)) : undefined,
       eventT: (this.stageKind === "goldrush" || this.stageKind === "altar") && this.phase === "play" ? Math.max(0, Math.ceil(this.eventT)) : undefined,

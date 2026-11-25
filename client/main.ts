@@ -379,6 +379,10 @@ function renderRecords() {
   sub(`스피드런 완주 (월드 ${WORLD_COUNT})`);
   if (!rec.total.length) add("-", "아직 기록 없음", "");
   rec.total.slice(0, 5).forEach((e, i) => add(`${i + 1}위`, e.names.join(", "), fmtTime(e.time)));
+  if (rec.total8?.length) {
+    sub("예전 8월드 완주 (v1.7까지)");
+    rec.total8.slice(0, 3).forEach((e, i) => add(`${i + 1}위`, e.names.join(", "), fmtTime(e.time)));
+  }
   sub("월드별 최고 구간 기록");
   for (let w = 1; w <= WORLD_COUNT; w++) {
     const best = rec.worlds[w]?.[0];

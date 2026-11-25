@@ -2,7 +2,7 @@ export type ClassId = "warrior" | "archer" | "mage" | "cleric" | "engineer" | "c
 export type ProjKind =
   | "arrow" | "orb" | "bolt" | "bigarrow" | "note" | "laser" | "turret" | "shuriken" | "dark" | "missile"
   // 몬스터 탄
-  | "bone" | "sand" | "ice" | "seed" | "fire" | "spirit" | "light";
+  | "bone" | "sand" | "ice" | "seed" | "fire" | "spirit" | "light" | "gear";
 
 /** self: 내 주변 / point: 지점 원 / line: 직선 / dir: 방향 / passive: 누르는 스킬 아님 (엔지니어 포탑 강화) */
 export type AimType = "self" | "point" | "line" | "dir" | "passive";

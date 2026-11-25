@@ -10,9 +10,11 @@ export type BossAbility = "slam" | "summon" | "ring" | "charge" | "strikes" | "t
   // v1.0 모든 보스 공통: 지진 파동 · 연속 사격 · (광폭화 후) 나선 탄막
   | "quake" | "barrage" | "spiral"
   // v1.4 보스 고유 패턴 (보스마다 하나씩)
-  | "bounce" | "sandwall" | "avalanche" | "garden" | "boltline" | "hellfire" | "phantom" | "judgment";
-export type MProjKind = "bone" | "sand" | "ice" | "seed" | "fire" | "spirit" | "light";
-export type Gimmick = "none" | "sandstorm" | "ice" | "swamp" | "void" | "lava" | "fog" | "prank";
+  | "bounce" | "sandwall" | "avalanche" | "garden" | "boltline" | "hellfire" | "phantom" | "judgment"
+  // v1.8 시계탑의 수호자: 시침·분침 회전 · 되감기 · 시간 정지 탄막
+  | "clockhands" | "rewind" | "timestop";
+export type MProjKind = "bone" | "sand" | "ice" | "seed" | "fire" | "spirit" | "light" | "gear";
+export type Gimmick = "none" | "sandstorm" | "ice" | "swamp" | "void" | "lava" | "fog" | "prank" | "clock";
 
 export interface MonsterDef {
   id: string;
@@ -48,7 +50,7 @@ export interface WorldDef {
   boss: string;
   floor: { base: string; groove: string; hi: string; speck: string; moss: string };
   wall: { top: string; topHi: string; front: string; mortar: string };
-  /** 특수 지형 타일 문자 (~ 유사, _ 빙판, % 독 늪, v 구멍, = 용암) */
+  /** 특수 지형 타일 문자 (~ 유사, _ 빙판, % 독 늪, v 구멍, = 용암, * 톱니 함정) */
   special?: string;
 }
 
@@ -88,6 +90,13 @@ export const MONSTERS: Record<string, MonsterDef> = Object.fromEntries([
   m({ id: "gold_golem", name: "황금 골렘", base: "golem", pal: { a: "#f0c040", A: "#a07018", l: "#fff4b0", e: "#e03030" }, ai: "caster", r: 8, hp: 80, speed: 28, dmg: 16, gold: 9, xp: 10 }),
   m({ id: "prank_god", name: "장난꾸러기 신", base: "golem", pal: { a: "#ffffff", A: "#c0b8e0", l: "#fff8c0", e: "#f05a8a" }, ai: "chaser", r: 16, hp: 1300, speed: 30, dmg: 17, gold: 60, xp: 100, scale: 3, proj: { kind: "light", speed: 115, count: 20, spread: 0, cd: 0 }, boss: { abilities: ["ring", "judgment", "strikes", "charge", "teleport", "summon"], summon: "angel", crown: true } }),
   // v1.4 월드별 세 번째 잡몹
+  // v1.8 월드 9: 태엽 시계탑
+  m({ id: "clock_soldier", name: "태엽 병정", base: "skeleton", pal: { a: "#d8a040", A: "#8a5a20", l: "#fff0b0", e: "#40e0f0" }, ai: "charger", r: 6, hp: 72, speed: 40, dmg: 15, gold: 8, xp: 10 }),
+  m({ id: "cuckoo_gunner", name: "뻐꾸기 포수", base: "flyer", pal: { a: "#a06838", A: "#603818", l: "#f0d0a0", e: "#ff4a4a" }, ai: "shooter", r: 5, hp: 42, speed: 44, dmg: 11, gold: 8, xp: 10, proj: { kind: "gear", speed: 145, count: 3, spread: 0.2, cd: 2.2 } }),
+  m({ id: "gear_bat", name: "톱니 박쥐", base: "flyer", pal: { a: "#a0a8b8", A: "#5a6070", l: "#e8ecf4", e: "#f0c040" }, ai: "chaser", r: 4, hp: 20, speed: 82, dmg: 8, gold: 3, xp: 4, scale: 0.8 }),
+  m({ id: "pendulum_golem", name: "추 진자 골렘", base: "golem", pal: { a: "#b08850", A: "#6a4a28", l: "#f8e0a0", e: "#40e0f0" }, ai: "chaser", r: 9, hp: 130, speed: 24, dmg: 19, gold: 10, xp: 12, scale: 1.2 }),
+  m({ id: "clock_keeper", name: "시계탑의 수호자", base: "golem", pal: { a: "#c89a48", A: "#6a4820", l: "#fff4c0", e: "#40f0e0" }, ai: "chaser", r: 16, hp: 1450, speed: 30, dmg: 18, gold: 70, xp: 120, scale: 3, proj: { kind: "gear", speed: 110, count: 18, spread: 0, cd: 0 }, boss: { abilities: ["clockhands", "rewind", "timestop", "ring", "summon"], summon: "gear_bat", crown: true } }),
+
   m({ id: "field_rat", name: "들쥐", base: "beast", pal: { a: "#a08060", A: "#604830", l: "#e0c8a8", e: "#ff4a4a" }, ai: "chaser", r: 4, hp: 14, speed: 72, dmg: 6, gold: 2, xp: 3, scale: 0.8 }),
   m({ id: "sand_worm", name: "모래 지렁이", base: "slime", pal: { a: "#c89060", A: "#805830", l: "#f0d0a0", e: "#141218" }, ai: "charger", r: 7, hp: 44, speed: 34, dmg: 12, gold: 5, xp: 7 }),
   m({ id: "frost_archer", name: "서리 궁수", base: "skeleton", pal: { a: "#b8d8f0", A: "#6890b0", l: "#ffffff", e: "#40a0f0" }, ai: "shooter", r: 5, hp: 28, speed: 36, dmg: 7, gold: 5, xp: 7, proj: { kind: "ice", speed: 135, count: 3, spread: 0.2, cd: 2.2, effect: "slow" } }),
@@ -160,6 +169,12 @@ export const WORLDS: WorldDef[] = [
     floor: { base: "#e8e0c8", groove: "#c8bc98", hi: "#f8f2e0", speck: "#d8ceb0", moss: "#a0d890" },
     wall: { top: "#f0d880", topHi: "#fff0b0", front: "#c0a050", mortar: "#907030" },
   },
+  {
+    id: 9, name: "태엽 시계탑", bossRoom: "시계탑 꼭대기", gimmick: "clock", desc: "시간이 느려졌다 빨라졌다 해요. 톱니 함정을 밟으면 아파요",
+    monsters: ["clock_soldier", "cuckoo_gunner"], extra: "gear_bat", boss: "clock_keeper", special: "*",
+    floor: { base: "#3a3040", groove: "#2a2230", hi: "#4a3e52", speck: "#c89a48", moss: "#6a5030" },
+    wall: { top: "#8a6a3a", topHi: "#c89a48", front: "#4a3828", mortar: "#2a1e14" },
+  },
 ];
 
 export const WORLD_COUNT = WORLDS.length;
@@ -187,5 +202,7 @@ export function specialMonsters(world: number): string[] {
   if (world >= 2) out.push("shield_knight");
   if (world >= 3) out.push("summoner");
   if (world >= 4) out.push("orb_mage");
+  // v1.8 시계탑: 추 진자 골렘
+  if (world >= 9) out.push("pendulum_golem");
   return out;
 }
