@@ -33,8 +33,8 @@ const B = g.players.get(2)!;
 
 // ---------- 카드 수 ----------
 check("검사 이름 변경 + 마법사 스킬 피해 감소", (await import("../shared/classes")).CLASSES.warrior.name === "검사" && (g as any).players.size > 0);
-check("카드 86장 (현란한 카드 5장 + 보스 유물 10개 포함)", CARDS.length === 86, `${CARDS.length}`);
-check("팀카드 10장", CARDS.filter((c) => c.rarity === "team").length === 10);
+check("카드 120장 (v1.8 시계탑 카드 34장 · 보스 유물 16개 포함)", CARDS.length === 120 && CARDS.filter((c) => c.rarity === "relic").length === 16, `${CARDS.length}`);
+check("팀카드 14장", CARDS.filter((c) => c.rarity === "team").length === 14);
 
 // ---------- 암시장 ----------
 G.startStage("rest");
@@ -1308,6 +1308,67 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   for (let i = 0; i < 20; i++) GP.updateProjs();
   check("관통 무제한: 3마리 모두 맞음", line.every((m) => m.total > 0), line.map((m) => m.total).join(","));
   check("관통할수록 -10%", line[1].total < line[0].total && line[2].total < line[1].total);
+}
+
+// ---------- v1.8: 새 카드 34장 ----------
+{
+  const { CARDS: C18, CARD_BY_ID: CB } = await import("../shared/cards");
+  const ids18 = ["g_oil", "g_bandage", "g_whet", "g_pocket", "g_stretch", "g_snack", "g_hourglass", "g_dashshot", "g_plague", "g_weakspot", "g_combo", "g_clockheart", "g_thunder", "g_broken", "g_bloodpact",
+    "w_quake", "a_volley", "m_nova", "c_prayer", "e_overclock", "k_dessert", "b_drum", "n_venom", "x_harvest",
+    "r_spring", "r_scale", "r_haste", "r_lich", "r_star", "r_fruit", "t_bell", "t_bonfire", "t_hunt", "t_gears"];
+  check("v1.8 카드 34장 · 전체 120장", ids18.length === 34 && ids18.every((id) => !!CB[id]) && C18.length === 120, `${C18.length}`);
+  check("카드 id 중복 없음", new Set(C18.map((c) => c.id)).size === C18.length);
+  const r18 = (id: string) => CB[id].rarity;
+  check("등급 구성: 개인 일반6·희귀5·전설2·저주2 / 팀4 / 유물6", ids18.slice(0, 6).every((i) => r18(i) === "common") && ids18.slice(6, 11).every((i) => r18(i) === "rare") && ids18.slice(11, 13).every((i) => r18(i) === "legend") && ids18.slice(13, 15).every((i) => r18(i) === "curse") && ids18.slice(24, 30).every((i) => r18(i) === "relic") && ids18.slice(30).every((i) => r18(i) === "team"));
+  check("직업 카드 9직업 1장씩", new Set(ids18.slice(15, 24).map((i) => CB[i].cls)).size === 9);
+
+  const gc = new Game([{ id: 1, name: "C1", color: 0, cls: "warrior" }, { id: 2, name: "C2", color: 1, cls: "cleric" }], () => {}, () => {}, () => {});
+  const GC = gc as any;
+  const [cw, cc] = [1, 2].map((id) => gc.players.get(id)!);
+  for (const p of gc.players.values()) { p.stats.critChance = 0; p.level = 10; }
+  gc.monsters = [];
+  GC.portalOpen = false;
+  // 약점 표시
+  const boss = gc.spawnMonster("king_slime", { x: cw.x + 30, y: cw.y })!;
+  boss.spawnT = 0;
+  let h = boss.hp; gc.dealDamage(boss, 10, cw, { noCrit: true }); const d0 = h - boss.hp;
+  gc.giveCard(cw, "g_weakspot");
+  h = boss.hp; gc.dealDamage(boss, 10, cw, { noCrit: true }); const d1 = h - boss.hp;
+  check("약점 표시: 보스에게 +20%", Math.abs(d1 / d0 - 1.2) < 0.01, `${(d1 / d0).toFixed(3)}`);
+  gc.monsters = [];
+  // 모래시계
+  gc.giveCard(cw, "g_hourglass");
+  const sm = gc.spawnMonster("slime", { x: cw.x + 40, y: cw.y })!; sm.spawnT = 0;
+  cw.hp = cw.stats.maxHp * 0.35; cw.invulnT = 0;
+  gc.hurtPlayer(cw, cw.stats.maxHp * 0.1, true);
+  check("모래시계: 30% 아래 → 주변 적 정지 + 20초 대기", sm.stunT >= 1.9 && cw.hourglassCd === 20);
+  // 피의 계약
+  gc.giveCard(cw, "g_bloodpact");
+  cw.hp = cw.stats.maxHp; cw.cds = [0, 0, 0, 0, 0];
+  gc.handleCast(1, 0, cw.x, cw.y);
+  check("피의 계약: 스킬 쓰면 최대 체력 5% 잃음", Math.abs(cw.stats.maxHp - cw.hp - cw.stats.maxHp * 0.05) < 0.01);
+  // 태엽 심장
+  gc.giveCard(cw, "g_clockheart");
+  cw.clockReady = true; cw.cds = [0, 0, 0, 0, 0];
+  gc.handleCast(1, 2, cw.x + 30, cw.y);
+  check("태엽 심장: 감긴 태엽 → 이번 스킬 쿨타임 없음", cw.cds[2] <= 0.3 && !(cw as { clockReady?: boolean }).clockReady);
+  // 고장 난 시계
+  gc.giveCard(cw, "g_broken");
+  GC.phase = "play"; GC.time = 16.1;
+  const jam1 = GC.jammed(cw);
+  GC.time = 17;
+  check("고장 난 시계: 8초마다 0.5초 멈춤", jam1 === true && GC.jammed(cw) === false);
+  // 생명의 열매
+  gc.giveCard(cc, "r_fruit");
+  cc.hp = 10;
+  for (let i = 0; i < 30; i++) GC.updateCardFx(cc);
+  check("생명의 열매: 초당 최대 체력 1%", Math.abs(cc.hp - 10 - cc.stats.maxHp * 0.01) < 0.05, `${(cc.hp - 10).toFixed(2)}`);
+  // 치유의 기도
+  gc.giveCard(cc, "c_prayer");
+  cw.hp = 50; cw.x = cc.x + 10; cw.y = cc.y; cc.hp = cc.stats.maxHp;
+  const dm = gc.spawnMonster("dummy", { x: cc.x + 20, y: cc.y })!; dm.spawnT = 0;
+  gc.dealDamage(dm, 5, cc, { onHit: true, noCrit: true });
+  check("치유의 기도: 평타 적중 → 다친 동료 +1.5", cw.hp === 51.5, `${cw.hp}`);
 }
 
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");

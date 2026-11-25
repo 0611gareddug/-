@@ -90,6 +90,27 @@ export interface Stats {
   killHeal: number;
   relicZap: number;
   relicShield: number;
+  /** v1.8 새 카드 */
+  hourglass: number;
+  dashShot: number;
+  poisonSpread: number;
+  bossDmg: number;
+  comboRush: number;
+  clockHeart: number;
+  thunderEvery: number;
+  brokenClock: number;
+  bloodPact: number;
+  regen: number;
+  ghostOnKill: number;
+  quakeLine: number;
+  volley: number;
+  frostNova: number;
+  prayer: number;
+  overclock: number;
+  dessert: number;
+  drum: number;
+  venomBlade: number;
+  soulHarvest: number;
 }
 
 export function baseStats(maxHp: number): Stats {
@@ -107,6 +128,8 @@ export function baseStats(maxHp: number): Stats {
     baseAtk: 10, baseSpeed: 70, baseAtkCd: 0.45, skillFlat: 0, skillCdFlat: 0, dmgFlatReduce: 0, goldFlat: 0, areaFlat: 0, shurikenPlus: 0, assassin: 0, curseExt: 0, curseBoost: 0, slotCd: [0, 0, 0, 0, 0],
     orbit: 0, critBoom: 0, meteorRain: 0, frostDash: 0, killZap: 0,
     phoenix: 0, killHeal: 0, relicZap: 0, relicShield: 0,
+    hourglass: 0, dashShot: 0, poisonSpread: 0, bossDmg: 0, comboRush: 0, clockHeart: 0, thunderEvery: 0, brokenClock: 0, bloodPact: 0,
+    regen: 0, ghostOnKill: 0, quakeLine: 0, volley: 0, frostNova: 0, prayer: 0, overclock: 0, dessert: 0, drum: 0, venomBlade: 0, soulHarvest: 0,
   };
 }
 
@@ -242,6 +265,13 @@ export const CARDS: CardDef[] = [
   card({ id: "r_crown", name: "황금 왕관", rarity: "relic", desc: "얻는 돈 +60%, 치명타 확률 +6%", quote: "무거운 머리", apply: (s) => { s.goldMul += 0.6; s.critChance += 0.06; } }),
   card({ id: "r_bottle", name: "번개 병", rarity: "relic", desc: "2.5초마다 가까운 적 3명에게 번개 (피해 14)", quote: "뚜껑 열지 마시오", apply: (s) => { s.relicZap = 1; } }),
   card({ id: "r_aegis", name: "수호의 방패", rarity: "relic", desc: "8초마다 보호막 30 (피해를 막아 줌)", quote: "든든하다", apply: (s) => { s.relicShield = 1; } }),
+  // v1.8 유물
+  card({ id: "r_spring", name: "시계탑의 태엽", rarity: "relic", desc: "모든 스킬 쿨타임 -1.5초, 대시 쿨타임 -0.2초", quote: "멈추지 않는 시간", apply: (s) => { s.skillCdFlat += 1.5; dashCd(s, 0.2); } }),
+  card({ id: "r_scale", name: "용의 비늘", rarity: "relic", desc: "받는 피해 -15%, 받은 근접 피해의 30% 반사", quote: "단단하고 뾰족함", apply: (s) => { s.dmgTakenMul *= 0.85; s.thorns += 0.3; } }),
+  card({ id: "r_haste", name: "시간 가속 장치", rarity: "relic", desc: "이동 속도 +10, 초당 공격 +0.4회", quote: "남들보다 1.2배속", apply: (s) => { addSpeed(s, 10); addAps(s, 0.4); } }),
+  card({ id: "r_lich", name: "망자의 왕관", rarity: "relic", desc: "적을 처치하면 12% 확률로 유령 아군 소환 (6초)", quote: "따르라", apply: (s) => { s.ghostOnKill = 0.12; } }),
+  card({ id: "r_star", name: "별의 조각", rarity: "relic", desc: "치명타 확률 +15%, 치명타 피해 +50%", quote: "반짝", apply: (s) => { s.critChance += 0.15; s.critMul += 0.5; } }),
+  card({ id: "r_fruit", name: "생명의 열매", rarity: "relic", desc: "초당 최대 체력 1% 회복", quote: "한 입 먹으면 기운이 솟음", apply: (s) => { s.regen += 0.01; } }),
   card({ id: "r_gem", name: "저주받은 보석", rarity: "relic", desc: "모든 피해 +40%, 최대 체력 -30%", quote: "아름답지만...", apply: (s) => { s.atkMul *= 1.4; s.maxHp = Math.round(s.maxHp * 0.7); } }),
 
   // ---------- 스킬 연동 (5) ----------
@@ -250,6 +280,34 @@ export const CARDS: CardDef[] = [
   card({ id: "chaincast", name: "연속 시전", rarity: "rare", desc: "스킬 사용 후 3초간 초당 공격 +0.8회", quote: "한 번 쓰면 멈출 수 없어", apply: (s) => { s.castHaste = 1; } }),
   card({ id: "cdthief", name: "쿨타임 도둑", rarity: "legend", desc: "적 처치 시 모든 스킬 쿨타임 0.3초 감소", quote: "남의 시간 훔치기", apply: (s) => { s.cdOnKill += 0.3; } }),
   card({ id: "earlyedu", name: "조기 교육", rarity: "rare", stack: true, desc: "즉시 경험치 +60", quote: "선행 학습", apply: (_s, c) => { c.addXp(60); } }),
+
+  // ---------- v1.8 태엽 시계탑 카드 (개인 15) ----------
+  card({ id: "g_oil", name: "기름칠한 태엽", rarity: "common", stack: true, desc: "초당 공격 +0.15회, 이동 속도 +3", quote: "끼익 소리가 사라졌다", apply: (s) => { addAps(s, 0.15); addSpeed(s, 3); } }),
+  card({ id: "g_bandage", name: "응급 붕대", rarity: "common", stack: true, desc: "최대 체력 +15, 받는 피해 -1", quote: "일단 감고 보자", apply: (s) => { s.maxHp += 15; s.dmgFlatReduce += 1; } }),
+  card({ id: "g_whet", name: "숫돌", rarity: "common", stack: true, desc: "평타 피해 +1, 치명타 확률 +3%", quote: "슥삭슥삭", apply: (s) => { addAtk(s, 1); s.critChance += 0.03; } }),
+  card({ id: "g_pocket", name: "두둑한 주머니", rarity: "common", stack: true, desc: "얻는 돈 +15%", quote: "주머니가 깊어졌다", apply: (s) => { s.goldMul += 0.15; } }),
+  card({ id: "g_stretch", name: "스트레칭", rarity: "common", stack: true, desc: "스킬 반경 +4, 스킬 쿨타임 -0.5초", quote: "어깨가 풀렸다", apply: (s) => { s.areaFlat += 4; s.skillCdFlat += 0.5; } }),
+  card({ id: "g_snack", name: "간식 주머니", rarity: "common", stack: true, desc: "적을 처치할 때마다 최대 체력 0.5% 회복", quote: "한 입씩 냠", apply: (s) => { s.killHeal += 0.005; } }),
+  card({ id: "g_hourglass", name: "모래시계", rarity: "rare", desc: "체력이 30% 아래로 떨어지면 주변 적 2초 정지 (20초마다 1번)", quote: "잠깐, 타임!", apply: (s) => { s.hourglass = 1; } }),
+  card({ id: "g_dashshot", name: "반동 사격", rarity: "rare", desc: "대시하면 가까운 적 3명에게 평타 피해 화살", quote: "구르면서 쏜다", apply: (s) => { s.dashShot = 1; } }),
+  card({ id: "g_plague", name: "독 안개", rarity: "rare", desc: "독에 걸린 적이 죽으면 주변 적 3명에게 독이 옮음", quote: "콜록콜록", apply: (s) => { s.poisonSpread = 1; } }),
+  card({ id: "g_weakspot", name: "약점 표시", rarity: "rare", desc: "보스·엘리트에게 주는 피해 +20%", quote: "빨간 동그라미 쳐둠", apply: (s) => { s.bossDmg = Math.max(s.bossDmg, 0.2); } }),
+  card({ id: "g_combo", name: "연속 처치 흥분", rarity: "rare", desc: "연속 처치 5 이상이면 평타 피해 +30%", quote: "멈출 수가 없어!", apply: (s) => { s.comboRush = 1; } }),
+  card({ id: "g_clockheart", name: "태엽 심장", rarity: "legend", desc: "10초마다 태엽이 감겨 다음 스킬 1번은 쿨타임 없음", quote: "똑딱똑딱", apply: (s) => { s.clockHeart = 1; } }),
+  card({ id: "g_thunder", name: "천둥 망치", rarity: "legend", desc: "8번째 평타마다 벼락이 떨어짐 (주변에 평타 3배 피해)", quote: "쾅!", apply: (s) => { s.thunderEvery = 8; } }),
+  card({ id: "g_broken", name: "고장 난 시계", rarity: "curse", desc: "초당 공격 +0.8회, 대신 8초마다 0.5초 동안 멈춤", quote: "가끔 멈춰도 괜찮아", apply: (s) => { addAps(s, 0.8); s.brokenClock = 1; } }),
+  card({ id: "g_bloodpact", name: "피의 계약", rarity: "curse", desc: "스킬 피해 +40%, 대신 스킬을 쓸 때마다 최대 체력 5% 잃음", quote: "대가는 치렀다", apply: (s) => { s.skillDmgMul *= 1.4; s.bloodPact = 1; } }),
+
+  // ---------- v1.8 직업 전용 (9) ----------
+  card({ id: "w_quake", cls: "warrior", name: "지진 발구르기", rarity: "rare", desc: "대지 가르기 끝에서 충격파 폭발 (피해 22)", quote: "땅이 갈라진다", apply: (s) => { s.quakeLine = 1; } }),
+  card({ id: "a_volley", cls: "archer", name: "연발 장전", rarity: "rare", desc: "4번째 평타마다 화살 2발이 더 나감", quote: "한 번에 세 대", apply: (s) => { s.volley = 1; } }),
+  card({ id: "m_nova", cls: "mage", name: "냉기 폭발", rarity: "rare", desc: "순간이동으로 떠난 자리에 얼음 장판", quote: "발밑 조심", apply: (s) => { s.frostNova = 1; } }),
+  card({ id: "c_prayer", cls: "cleric", name: "치유의 기도", rarity: "rare", desc: "평타가 적을 맞힐 때마다 근처에서 가장 다친 동료 체력 +1.5", quote: "한 대에 한 기도", apply: (s) => { s.prayer = 1; } }),
+  card({ id: "e_overclock", cls: "engineer", name: "오버클럭", rarity: "legend", desc: "설치 포탑 공격 속도 +50%, 지속 +4초", quote: "냉각팬 최대로", apply: (s) => { s.overclock = 1; } }),
+  card({ id: "k_dessert", cls: "cook", name: "후식", rarity: "rare", desc: "음식 던지기를 맞은 동료에게 보호막 15", quote: "디저트 배는 따로 있지", apply: (s) => { s.dessert = 1; } }),
+  card({ id: "b_drum", cls: "bard", name: "큰북", rarity: "rare", desc: "불협화음 피해 2배", quote: "둥! 둥! 둥!", apply: (s) => { s.drum = 1; } }),
+  card({ id: "n_venom", cls: "ninja", name: "독 단검", rarity: "rare", desc: "평타에 독 + 독 걸린 적에게 피해 +20%", quote: "살짝만 베도 충분", apply: (s) => { s.poison = 1; s.venomBlade = 1; } }),
+  card({ id: "x_harvest", cls: "necro", name: "영혼 수확", rarity: "legend", desc: "처치할 때 마력 2배, 마물 소환 지속 +5초", quote: "하나도 놓치지 않아", apply: (s) => { s.soulHarvest = 1; } }),
 
   // ---------- 팀카드 (10, 투표 전용) ----------
   card({ id: "t_feast", name: "단체 회식", rarity: "team", desc: "전원 최대 체력 +40", quote: "고기 먹으러 가자", apply: (s, c) => { s.maxHp += 40; c.healFull(); } }),
@@ -261,6 +319,11 @@ export const CARDS: CardDef[] = [
   card({ id: "t_exercise", name: "단체 운동", rarity: "team", desc: "전원 이동 속도 +8, 대시 쿨타임 -0.2초", quote: "아침 조깅 효과", apply: (s) => { addSpeed(s, 8); dashCd(s, 0.2); } }),
   card({ id: "t_extracard", name: "카드 한 장 더", rarity: "team", desc: "다음 3라운드 카드 선택지 4장", quote: "고민이 늘었다", apply: (_s, c) => { c.team("extraOption", 3); } }),
   card({ id: "t_laststand", name: "마지막 발악", rarity: "team", desc: "체력 25% 이하일 때 평타 피해 +5", quote: "아직 안 끝났다", apply: (s) => { s.lowHpAtk = 5; } }),
+  // v1.8 팀카드
+  card({ id: "t_bell", name: "시계탑 종소리", rarity: "team", desc: "전원 스킬 쿨타임 -10%", quote: "댕~ 댕~", apply: (s) => { s.skillCdMul *= 0.9; } }),
+  card({ id: "t_bonfire", name: "모닥불", rarity: "team", desc: "전원 최대 체력 +20, 받는 피해 -1", quote: "마시멜로 구워 먹자", apply: (s, c) => { s.maxHp += 20; s.dmgFlatReduce += 1; c.healFull(); } }),
+  card({ id: "t_hunt", name: "사냥 대회", rarity: "team", desc: "전원 얻는 돈 +25%, 치명타 확률 +5%", quote: "누가 더 많이 잡나", apply: (s) => { s.goldMul += 0.25; s.critChance += 0.05; } }),
+  card({ id: "t_gears", name: "톱니 파티", rarity: "team", desc: "전원 주위를 도는 톱니 칼날 +1개", quote: "빙글빙글 같이 돌자", apply: (s) => { s.orbit = Math.min(4, s.orbit + 1); } }),
   card({ id: "t_cursed", name: "저주 받은 용사단", rarity: "team", desc: "전원 저주 카드 1장 + 전설 카드 1장", quote: "같이 망하자", apply: (_s, c) => { c.grantRandom("curse"); c.grantRandom("legend"); } }),
 ];
 

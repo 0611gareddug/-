@@ -51,6 +51,8 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
         const ex = p.x + Math.cos(t.a + off) * len;
         const ey = p.y + Math.sin(t.a + off) * len;
         g.fx.push({ k: "line", x: p.x, y: p.y, r: w, pts: [Math.round(ex), Math.round(ey)] });
+        // v1.8 카드 '지진 발구르기': 가운데 줄 끝에서 충격파
+        if (!off && p.stats.quakeLine) g.explode(ex, ey, 40, 22, p, true);
         for (const m of [...g.monsters]) {
           if (m.spawnT > 0 || hit.has(m.id)) continue;
           if (distToSegment(m.x, m.y, p.x, p.y, ex, ey) < w + m.r) { hit.add(m.id); g.dealDamage(m, off ? 17 : 30, p, { skill: true }); }
@@ -118,6 +120,8 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
       p.invulnT = Math.max(p.invulnT, 0.3);
       g.fx.push({ k: "blink", x: Math.round(ox), y: Math.round(oy), pts: [Math.round(tx), Math.round(ty)] });
       g.explode(ox, oy, def.radius * area, 30, p, true);
+      // v1.8 카드 '냉기 폭발': 떠난 자리에 얼음 장판
+      if (p.stats.frostNova) g.addZone("ice", ox, oy, def.radius * area, p.id, 0, 3);
       if (tl("m_arcane") >= 5) {
         // 마법사 특성 '연속 도약': 한 번 더 바로 쓸 수 있음
         if (!p.blink2) { p.blink2 = true; p.cds[slot] = 0.4; } else p.blink2 = false;
@@ -177,6 +181,8 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
         for (const q of g.players.values()) {
           if (q.ghost || Math.hypot(q.x - s.x, q.y - s.y) > r) continue;
           q.hp = Math.min(q.stats.maxHp, q.hp + q.stats.maxHp * heal);
+          // v1.8 카드 '후식': 보호막 15
+          if (p.stats.dessert) { q.shield = Math.max(q.shield, 15); q.shieldT = Math.max(q.shieldT, 8); }
         }
       }
       break;
@@ -228,7 +234,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
       break;
     }
     case "bard2":
-      g.addZone("discord", p.x, p.y, def.radius * area * (p.stats.loud ? 1.5 : 1) * (tl("b_noise") >= 5 ? 1.1 : 1), p.id, 6, tl("b_noise") >= 5 ? 5 : 4);
+      g.addZone("discord", p.x, p.y, def.radius * area * (p.stats.loud ? 1.5 : 1) * (tl("b_noise") >= 5 ? 1.1 : 1), p.id, p.stats.drum ? 12 : 6, tl("b_noise") >= 5 ? 5 : 4);
       break;
     // ---------- 엔지니어 (v0.9 개편) ----------
     case "engineer0": {
@@ -236,7 +242,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
       const mine = g.petsOf(p.id, "turret");
       if (mine.length >= (tl("e_turret") >= 5 ? 3 : 2)) g.removePet(mine[0].id);
       const at = isWallAt(g.map, t.x, t.y) ? { x: p.x, y: p.y } : { x: t.x, y: t.y };
-      g.summon(p, "turret", 12 + (tl("e_turret") >= 3 ? 4 : 0), at);
+      g.summon(p, "turret", 12 + (tl("e_turret") >= 3 ? 4 : 0) + (p.stats.overclock ? 4 : 0), at);
       g.fx.push({ k: "shield", x: Math.round(at.x), y: Math.round(at.y) });
       break;
     }
@@ -345,7 +351,7 @@ export function castSkill(g: Game, p: Player, slot: number, x: number, y: number
     }
     case "necro3":
       // v1.8 마물 소환: 이 월드 보스의 미니 버전 15초 + 마력 10마다 부하 1마리 (마력 모두 소모)
-      g.summonFiend(p, 15);
+      g.summonFiend(p, 15 + (p.stats.soulHarvest ? 5 : 0));
       break;
 
     // ---------- v1.6 각성기 (5번, Lv15) ----------

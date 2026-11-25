@@ -45,6 +45,10 @@ export interface Player extends Participant {
   fallCd?: number;
   /** v1.8 톱니 함정 피해 쿨타임 */
   gearCd?: number;
+  /** v1.8 카드: 모래시계 재사용 대기 / 태엽 심장 (감기는 시간 · 준비됨) */
+  hourglassCd?: number;
+  clockT?: number;
+  clockReady?: boolean;
   /** 커맨드 관전·투명 모드 */
   spec?: boolean;
   /** 엔지니어 거대 로봇 / 수리 드론 */
@@ -741,6 +745,15 @@ export class Game {
     const def = CLASSES[p.cls].skills[slot];
     if (def.aim === "passive") return;
     p.cds[slot] = p.nocd ? 0 : this.isRest ? 0.3 : skillCd(def.cd, p.stats, slot);
+    // v1.8 카드 '태엽 심장': 감긴 태엽을 풀어 이번 스킬은 쿨타임 없음
+    if (p.clockReady && !this.isRest && p.cds[slot] > 0.3) {
+      p.cds[slot] = 0.3;
+      p.clockReady = false;
+      p.clockT = 10;
+      this.fx.push({ k: "encore", x: Math.round(p.x), y: Math.round(p.y), r: 24 });
+    }
+    // v1.8 저주 '피의 계약': 스킬마다 최대 체력 5% (쓰러지진 않음)
+    if (p.stats.bloodPact && !this.isRest) p.hp = Math.max(1, p.hp - p.stats.maxHp * 0.05);
     castSkill(this, p, slot, Number(x) || p.x, Number(y) || p.y);
     if (p.stats.castHaste) p.castHasteT = 3;
     if (p.stats.manaSurge) p.surgeT = 3;
@@ -2510,6 +2523,17 @@ export class Game {
             this.dealDamage(m, 8, p, { raw: false, noCrit: true });
           }
         }
+        if (p.stats.dashShot) {
+          // v1.8 카드 '반동 사격': 가까운 적 3명에게 평타 피해 화살
+          const near = this.monsters
+            .filter((m) => m.spawnT <= 0 && m.kind !== "chest" && m.kind !== "dummy" && (m.kind !== "pvp" || this.canPvp(p.id, m.owner ?? -1)) && Math.hypot(m.x - p.x, m.y - p.y) < 180)
+            .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
+            .slice(0, 3);
+          for (const m of near) {
+            const pr = this.fireProj(p, "arrow", Math.atan2(m.y - p.y, m.x - p.x), 260, 0.8, def.attack.dmg, {});
+            pr.pierce = 0;
+          }
+        }
         this.startDash(p, len > 0 ? mx : Math.cos(p.aim), len > 0 ? my : Math.sin(p.aim), DASH_TIME, DASH_SPEED, false);
       }
     }
@@ -2553,6 +2577,7 @@ export class Game {
       if (tile === "%") speed *= 0.8;
       if (this.prankFastT > 0) speed *= 1.4;
       speed *= this.warpMul;
+      if (this.jammed(p)) speed = 0;
       if (this.gem.holder === p.id) speed *= 0.85;
       const tx = mx * speed;
       const ty = my * speed;
@@ -2587,8 +2612,8 @@ export class Game {
       }
     }
 
-    // 기본 공격
-    if (p.input.atk && p.atkCd <= 0) {
+    // 기본 공격 (v1.8 저주 '고장 난 시계'로 멈춘 동안은 못 함)
+    if (p.input.atk && p.atkCd <= 0 && !this.jammed(p)) {
       // 연속 시전: 초당 공격 +0.8회 (고정값)
       const mul = p.stats.atkSpdMul + (p.castHasteT > 0 ? 0.8 * def.attack.cd : 0);
       p.atkCd = def.attack.cd / (mul * (p.spicyT > 0 ? 1.3 : 1) * ((p.songFastT ?? 0) > 0 ? 1.15 : 1));
@@ -2657,6 +2682,8 @@ export class Game {
         // 궁수 특성 '삼연발': 3번째 평타마다 3갈래
         const triple = !p.stats.multishot && tier(p.tal, "a_rapid") >= 5 && p.atkCount % 3 === 0;
         const angles = p.stats.multishot || triple ? [aim - 0.25, aim, aim + 0.25] : [aim];
+        // v1.8 궁수 카드 '연발 장전': 4번째 평타마다 2발 더
+        if (p.stats.volley && p.atkCount % 4 === 0) angles.push(aim - 0.12, aim + 0.12);
         const each = p.stats.multishot ? base * 0.5 : base;
         const life = (def.attack.projLife ?? 1) * (tier(p.tal, "a_snipe") >= 3 ? 1.2 : 1);
         for (const a of angles) {
@@ -2665,6 +2692,23 @@ export class Game {
           if (def.pierceAll) pr.pierceAll = 0;
           if (pr.kind === "note") pr.hops = 1 + (p.stats.echo ? 2 : 0);
           if (p.surgeT > 0) pr.explode = Math.max(pr.explode, 24);
+        }
+      }
+      if (p.stats.thunderEvery && p.atkCount % p.stats.thunderEvery === 0) {
+        // v1.8 카드 '천둥 망치': 가장 가까운 적 자리에 벼락
+        let best: Monster | null = null;
+        let bd = 140;
+        for (const m of this.monsters) {
+          if (m.spawnT > 0 || m.kind === "chest" || (m.kind === "pvp" && !this.canPvp(p.id, m.owner ?? -1))) continue;
+          const d = Math.hypot(m.x - p.x, m.y - p.y);
+          if (d < bd) { bd = d; best = m; }
+        }
+        if (best) {
+          const bx = best.x, by = best.y;
+          this.fx.push({ k: "bolt", x: Math.round(bx), y: Math.round(by), r: 40 });
+          for (const m of [...this.monsters]) {
+            if (m.spawnT <= 0 && Math.hypot(m.x - bx, m.y - by) < 40 + m.r) this.dealDamage(m, base * 3, p, { noCrit: true });
+          }
         }
       }
       if (p.stats.spinEvery && p.atkCount % p.stats.spinEvery === 0) {
@@ -2692,6 +2736,11 @@ export class Game {
     out.sort((a, b) => a.d - b.d);
     out.forEach((o, i) => { o.k = i; });
     return out;
+  }
+
+  /** v1.8 저주 '고장 난 시계': 8초마다 0.5초 멈춤 */
+  jammed(p: Player) {
+    return !!p.stats.brokenClock && this.phase === "play" && this.time % 8 < 0.5;
   }
 
   reversed(p: Player) {
@@ -2945,7 +2994,7 @@ export class Game {
         pr = this.fireProj(o, "turret", a, 220, 0.8, 3, {});
         pr.pierce = 0;
       } else if (pt.kind === "turret") {
-        pt.cd = tier(o.tal, "e_turret") >= 4 ? 0.45 / 1.4 : 0.45;
+        pt.cd = (tier(o.tal, "e_turret") >= 4 ? 0.45 / 1.4 : 0.45) / (o.stats.overclock ? 1.5 : 1);
         pr = this.fireProj(o, "turret", a, 260, 0.9, 6, { skill: true });
         pr.pierce = 0;
       } else if (pt.kind === "shadow") {
@@ -3492,6 +3541,17 @@ export class Game {
 
   /** v1.4 카드 효과: 회전 칼날 · 유성 소환 */
   private updateCardFx(p: Player) {
+    if (p.hourglassCd) p.hourglassCd = Math.max(0, p.hourglassCd - DT);
+    // v1.8 '생명의 열매': 초당 최대 체력 % 회복
+    if (p.stats.regen) p.hp = Math.min(p.stats.maxHp, p.hp + p.stats.maxHp * p.stats.regen * DT);
+    // v1.8 '태엽 심장': 10초마다 태엽이 감김
+    if (p.stats.clockHeart && !p.clockReady) {
+      p.clockT = (p.clockT ?? 10) - DT;
+      if (p.clockT <= 0) {
+        p.clockReady = true;
+        this.fx.push({ k: "shield", x: Math.round(p.x), y: Math.round(p.y) });
+      }
+    }
     if (p.stats.relicZap) {
       p.relicZapT = (p.relicZapT ?? 2.5) - DT;
       if (p.relicZapT <= 0) {
@@ -3931,6 +3991,12 @@ export class Game {
     if (!o.skill && !o.raw && tier(p.tal, "w_berserk") >= 2 && p.hp < p.stats.maxHp * 0.5) dmg *= 1.15;
     if ((m.curseT ?? 0) > 0) dmg *= m.curseBoost ? 1.5 : 1.3;
     if (!o.raw) {
+      // v1.8 카드: 약점 표시(보스·엘리트) · 연속 처치 흥분(평타) · 독 단검
+      if (p.stats.bossDmg && (m.def.boss || m.elite)) dmg *= 1 + p.stats.bossDmg;
+      if (p.stats.comboRush && !o.skill && (p.combo ?? 0) >= 5 && (p.comboT ?? 0) > 0) dmg *= 1.3;
+      if (p.stats.venomBlade && m.poisonT > 0) dmg *= 1.2;
+    }
+    if (!o.raw) {
       dmg *= p.stats.atkMul;
       if (p.talN) dmg *= Math.pow(TALENT_TAX, p.talN);
       if (p.giantT > 0) dmg *= 1.5;
@@ -3969,6 +4035,15 @@ export class Game {
       this.shattering = false;
     }
     if (!o.onHit) return;
+    // v1.8 성직자 카드 '치유의 기도': 근처에서 가장 다친 동료 +1.5
+    if (p.stats.prayer) {
+      let low: Player | null = null;
+      for (const q of this.players.values()) {
+        if (q.ghost || q.hp >= q.stats.maxHp || Math.hypot(q.x - p.x, q.y - p.y) > 120) continue;
+        if (!low || q.hp / q.stats.maxHp < low.hp / low.stats.maxHp) low = q;
+      }
+      if (low) low.hp = Math.min(low.stats.maxHp, low.hp + 1.5);
+    }
     // 평타 적중 효과 (넉백·빙결·독·번개)
     if (m.hp > 0 || m.kind === "dummy") {
       if (p.stats.knockback && !m.def.boss && m.kind !== "dummy" && m.kind !== "chest" && m.def.ai !== "turret") {
@@ -4060,8 +4135,21 @@ export class Game {
       }
     }
     killer.kills++;
-    // v1.8 네크로 마력: 처치할 때마다 +1 (소환물이 잡아도 주인 몫)
-    if (killer.cls === "necro" && m.kind !== "dummy" && m.kind !== "chest" && m.kind !== "pvp") killer.mana = Math.min(MANA_MAX, (killer.mana ?? 0) + 1);
+    // v1.8 네크로 마력: 처치할 때마다 +1 (소환물이 잡아도 주인 몫, 카드 '영혼 수확'이면 +2)
+    const realKill = m.kind !== "dummy" && m.kind !== "chest" && m.kind !== "pvp";
+    if (killer.cls === "necro" && realKill) killer.mana = Math.min(MANA_MAX, (killer.mana ?? 0) + (killer.stats.soulHarvest ? 2 : 1));
+    // v1.8 카드 '독 안개': 독 걸린 적이 죽으면 주변 3명에게 독
+    if (killer.stats.poisonSpread && m.poisonT > 0 && realKill) {
+      const near = this.monsters
+        .filter((o) => o.spawnT <= 0 && o.kind !== "chest" && o.kind !== "pvp" && o.kind !== "dummy" && Math.hypot(o.x - m.x, o.y - m.y) < 80)
+        .slice(0, 3);
+      for (const o of near) { o.poisonT = Math.max(o.poisonT, 3); o.poisonDps = Math.max(o.poisonDps, m.poisonDps || 4 * killer.stats.atkMul); o.poisonOwner = killer.id; }
+      if (near.length) this.fx.push({ k: "zap", x: Math.round(m.x), y: Math.round(m.y), pts: near.flatMap((o) => [Math.round(o.x), Math.round(o.y)]) });
+    }
+    // v1.8 유물 '망자의 왕관': 처치 시 확률로 유령 아군 (최대 4)
+    if (killer.stats.ghostOnKill && realKill && !killer.ghost && Math.random() < killer.stats.ghostOnKill && this.petsOf(killer.id, "ghost").length < 4) {
+      this.summon(killer, "ghost", 6, { x: m.x, y: m.y });
+    }
     this.fx.push({ k: "die", x: Math.round(m.x), y: Math.round(m.y), r: m.r });
 
     // 경험치: 넣은 피해 비율만큼 / 돈: 기여도 1위가 전부 (보스는 생존자 균등)
@@ -4164,6 +4252,15 @@ export class Game {
     if (src?.elite === "vamp") src.hp = Math.min(src.mhp, src.hp + dealt * 3);
     p.flashT = 0.12;
     if (src && p.stats.thorns) this.dealDamage(src, dmg * p.stats.thorns, p, { raw: true, noCrit: true });
+    // v1.8 카드 '모래시계': 체력 30% 아래로 떨어지면 주변 적 2초 정지
+    if (p.stats.hourglass && p.hp > 0 && p.hp < p.stats.maxHp * 0.3 && (p.hourglassCd ?? 0) <= 0) {
+      p.hourglassCd = 20;
+      this.fx.push({ k: "awaken", x: Math.round(p.x), y: Math.round(p.y), r: 70 });
+      for (const m of this.monsters) {
+        if (m.spawnT > 0 || m.kind === "chest" || m.kind === "dummy" || m.kind === "pvp" || Math.hypot(m.x - p.x, m.y - p.y) > 130) continue;
+        m.stunT = Math.max(m.stunT, m.def.boss ? 0.8 : 2);
+      }
+    }
     if (p.hp <= 0) this.knockOut(p);
     return true;
   }
