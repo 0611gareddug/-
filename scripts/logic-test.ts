@@ -1444,5 +1444,46 @@ check("밸런스: 검사 범위 36 · 궁수 화살비 쿨 13.5 · 성직자 공
   check("카드를 빼면 능력치도 원래대로", bu.stats.atkMul < atk0 && !bu.cards.includes("muscle"));
 }
 
+// ---------- v1.9: 서버 없이 (방장 브라우저 허브 · 기록 동기화) ----------
+{
+  const { Hub } = await import("../server/room");
+  const st = await import("../server/store");
+  const hub = new Hub("ABCD", "");
+  const inbox: Record<number, any[]> = { 0: [], 1: [] };
+  hub.open(0, { send: (d) => inbox[0].push(JSON.parse(d)) });
+  hub.open(1, { send: (d) => inbox[1].push(JSON.parse(d)) });
+  hub.message(1, JSON.stringify({ t: "create", name: "몰래" }));
+  check("참가자는 방을 못 만듦 (방장 브라우저만)", inbox[1].some((m) => m.t === "error") && !hub.room);
+  hub.message(0, JSON.stringify({ t: "create", name: "방장19" }));
+  check("방장이 방 만들기", inbox[0].some((m) => m.t === "joined" && m.code === "ABCD") && !!hub.room);
+  const guestName = `손님${Date.now() % 1000}`;
+  hub.message(1, JSON.stringify({ t: "join", code: "abcd", name: guestName, slice: { profile: { ach: ["king"], counters: {}, w1Classes: [], equip: {}, mastery: { mage: 600 }, skins: {} }, clear: true } }));
+  check("참가 + 내 기록(업적·숙련도)을 방장에게 가져옴", inbox[1].some((m) => m.t === "joined") && st.getProfile(guestName).ach.includes("king") && st.getProfile(guestName).mastery.mage === 600 && st.canHardcore(guestName));
+  hub.message(1, JSON.stringify({ t: "ping", c: 5 }));
+  check("핑", inbox[1].some((m) => m.t === "pong" && m.c === 5));
+  st.takeDirty();
+  st.unlockAch(guestName, "first_step");
+  inbox[1].length = 0;
+  hub.flushSync();
+  const sy = inbox[1].find((m) => m.t === "sync");
+  check("기록이 바뀌면 참가자에게 그 사람 몫만 보냄", !!sy && sy.slice.profile.ach.includes("first_step"));
+  inbox[0].length = 0;
+  st.unlockAch("방장19", "first_step");
+  hub.flushSync();
+  check("방장 자신에겐 동기화 안 보냄 (자기 저장소)", !inbox[0].some((m) => m.t === "sync"));
+  // 저장소 내보내기 → 다시 불러오기
+  const saved = JSON.stringify(st.exportStore());
+  st.loadStore(saved);
+  check("저장소 JSON 왕복", st.getProfile(guestName).ach.includes("first_step"));
+  // 다른 브라우저 몫 합치기: 순위 중복 없이
+  const rk = st.addRecord(2, 0, [guestName], 999);
+  const slice = st.sliceFor(guestName);
+  st.mergeSlice(guestName, slice);
+  check("순위 합치기: 중복 없음", rk >= 1 && st.getRecords()["2"].total.filter((e) => e.names.includes(guestName) && e.time === 999).length === 1);
+  hub.close(1);
+  hub.close(0);
+  hub.dispose();
+}
+
 console.log(fails ? `\n${fails}개 실패` : "\n전부 통과");
 process.exit(fails ? 1 : 0);

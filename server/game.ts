@@ -1,3 +1,4 @@
+import { ENV } from "./env";
 import {
   CARD_PICK_TIME, DASH_COOLDOWN, DASH_SPEED, DASH_TIME, DT, GHOST_SPEED, HIT_INVULN, MARKET_RANGE,
   PLAYER_RADIUS, PORTAL_RANGE, REST_MAX_TIME, REVIVE_HP, REVIVE_RANGE, REVIVE_TIME, ROUND_HEAL, ROUNDS_PER_WORLD,
@@ -501,27 +502,27 @@ export class Game {
     if (opts.mode.panic) {
       this.panic = true;
       // 테스트용: START_ZONE=15 처럼 시작 구역 지정
-      this.zone = Math.max(0, Math.min(PANIC_ZONES - 1, Number(process.env.START_ZONE ?? 1) - 1));
+      this.zone = Math.max(0, Math.min(PANIC_ZONES - 1, Number(ENV.START_ZONE ?? 1) - 1));
       this.nextRound();
       return;
     }
     if (opts.mode.descent) {
       this.descent = true;
       // 테스트용: START_FLOOR=29 처럼 시작 층 지정
-      this.floor = Math.max(0, Number(process.env.START_FLOOR ?? 1) - 1);
+      this.floor = Math.max(0, Number(ENV.START_FLOOR ?? 1) - 1);
       this.nextRound();
       return;
     }
     if (opts.save) this.restore(opts.save);
     // 테스트용: START_WORLD=5, START_ROUND=3 처럼 시작 지점 지정
-    if (process.env.START_WORLD) this.world = Math.max(1, Math.min(WORLD_COUNT, Number(process.env.START_WORLD)));
-    this.round = Math.max(0, Number(process.env.START_ROUND ?? 1) - 1);
+    if (ENV.START_WORLD) this.world = Math.max(1, Math.min(WORLD_COUNT, Number(ENV.START_WORLD)));
+    this.round = Math.max(0, Number(ENV.START_ROUND ?? 1) - 1);
     // 테스트용: START_EVENT=collapse|puzzle|merchant 이면 그 이벤트 방에서 바로 시작
-    const se = process.env.START_EVENT;
+    const se = ENV.START_EVENT;
     if (se === "merchant" || se === "collapse" || se === "puzzle") {
       this.round = 1;
       if (se === "merchant") this.startMerchant();
-      else { process.env.FORCE_EVENT_ROOM = se; this.startMiniGame(); }
+      else { ENV.FORCE_EVENT_ROOM = se; this.startMiniGame(); }
       return;
     }
     this.nextRound();
@@ -1214,14 +1215,14 @@ export class Game {
       return;
     }
     // 테스트용: FORCE_EVENT=vote|rest|gambler 면 매 라운드 그 이벤트
-    const forced = process.env.FORCE_EVENT;
+    const forced = ENV.FORCE_EVENT;
     if ((this.round % 3 === 0 || forced) && this.round <= ROUNDS_PER_WORLD) this.openEvent();
     else this.nextRound();
   }
 
   /** 이벤트: 팀카드 투표 55% / 암시장 45% (도박꾼은 v0.9에서 삭제) */
   private openEvent() {
-    const forced = process.env.FORCE_EVENT;
+    const forced = ENV.FORCE_EVENT;
     const ev = forced === "vote" || forced === "rest" ? forced : Math.random() < 0.55 ? "vote" : "rest";
     if (ev === "vote") this.openVote();
     else {
@@ -1677,7 +1678,7 @@ export class Game {
 
   // ---------- v1.8 미니 게임 · 떠도는 상인 ----------
   private startMiniGame() {
-    const forced = process.env.FORCE_EVENT_ROOM;
+    const forced = ENV.FORCE_EVENT_ROOM;
     const kind = forced === "collapse" || forced === "puzzle" ? forced : Math.random() < 0.5 ? "collapse" : "puzzle";
     if (kind === "collapse") this.title("미니 게임: 무너지는 바닥", "30초 동안 떨어지지 말고 버티면 돈 + 희귀 카드! (떨어져도 죽진 않아요)", "#f0a040");
     else this.title("미니 게임: 협동 발판 퍼즐", this.aliveCount() > 1 ? "빛나는 발판을 다 같이 동시에 밟아요! 3번 성공하면 보상" : "번호 순서대로 발판을 밟아요! 3번 성공하면 보상", "#60d0f0");
@@ -2506,9 +2507,9 @@ export class Game {
         // 랜덤방: 시련의 방 15% / 보물방 15% (테스트용 FORCE_TRIAL=1, FORCE_TREASURE=1)
         const roll = Math.random();
         // v1.5: 시련 12% · 보물 12% · 황금 러시 10% · 저주받은 제단 8%
-        const forced = process.env.FORCE_EVENT_ROOM;
-        if (this.stageKind === "battle" && process.env.FORCE_TREASURE === "1") this.startTreasure();
-        else if (this.stageKind === "battle" && (process.env.FORCE_TRIAL === "1" || roll < 0.12)) this.openTrialVote();
+        const forced = ENV.FORCE_EVENT_ROOM;
+        if (this.stageKind === "battle" && ENV.FORCE_TREASURE === "1") this.startTreasure();
+        else if (this.stageKind === "battle" && (ENV.FORCE_TRIAL === "1" || roll < 0.12)) this.openTrialVote();
         else if (this.stageKind === "battle" && roll < 0.24) this.startTreasure();
         else if (this.stageKind === "battle" && (forced === "goldrush" || (!forced && roll < 0.34))) this.startGoldRush();
         else if (this.stageKind === "battle" && (forced === "altar" || (!forced && roll < 0.42))) this.startAltar();

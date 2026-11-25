@@ -16,12 +16,20 @@
         <h1 class="logo">양배추 용사단!</h1>
         <p class="sub">친구들과 함께하는 엉성한 던전 원정</p>
         <label class="field">닉네임<input id="name" maxlength="10" placeholder="용사 이름" /></label>
-        <button id="btn-create" class="btn primary">방 만들기</button>
+        <button id="btn-solo" class="btn primary big">혼자 하기</button>
+        <div class="title-sep"><span>친구와 같이 하기</span></div>
+        <button id="btn-create" class="btn">방 만들기 <span class="muted">(내가 방장)</span></button>
         <div class="row">
-          <input id="code" maxlength="4" placeholder="방 코드" />
-          <button id="btn-join" class="btn">입장</button>
+          <input id="code" maxlength="4" placeholder="방 코드" autocapitalize="characters" />
+          <button id="btn-join" class="btn">참가</button>
         </div>
         <p id="title-error" class="error"></p>
+        <p class="title-note muted">같이 하기는 방장 기기가 게임을 돌려요. 방장이 나가면 방이 끝나요. (휴대폰 방장은 4명 이하 추천)</p>
+        <div class="row title-data">
+          <button id="btn-export" class="btn tiny">기록 내보내기</button>
+          <button id="btn-import" class="btn tiny">기록 불러오기</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
       </div>
     </section>
 
@@ -46,7 +54,7 @@
           </div>
           <div class="lobby-col">
             <div class="rec-head">
-              <span id="rec-title" class="muted">순위</span>
+              <span id="rec-title" class="muted">내 기록</span>
             </div>
             <div id="records" class="records"></div>
           </div>

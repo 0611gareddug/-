@@ -1,39 +1,31 @@
-import http from "node:http";
-import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { WebSocketServer, WebSocket } from "ws";
+// v1.9 방 관리 (예전 server/index.ts): 서버 없이 방장 브라우저의 Web Worker 안에서 돌아감
+// 연결(Conn)은 방장 자신(로컬) 또는 P2P로 들어온 친구. 메시지 형식은 예전 WebSocket과 같음(JSON 문자열)
 import { MAX_PLAYERS, PLAYER_COLORS, TICK_RATE } from "../shared/constants";
 import { LobbyPlay } from "./lobbyPlay";
 import { CLASS_IDS, type ClassId } from "../shared/classes";
 import type { ClientMsg, RoomMode, ServerMsg } from "../shared/protocol";
 import { Game } from "./game";
-import { canHardcore, cloudOn, cosFor, flushStore, getCodex, getProfile, getRecords, getSave, initStore, savesFor, setEquip, setSkin, unlockAch } from "./store";
+import { canHardcore, cosFor, getCodex, getProfile, getRecords, getSave, mergeSlice, savesFor, setEquip, setSkin, sliceFor, takeDirty, unlockAch, type Slice } from "./store";
 import { ACHIEVEMENTS, SLOT_NAME, type Equip } from "../shared/achievements";
 
-// 개발 모드에선 Vite가 /ws 를 2567로 프록시하므로 PORT 환경변수를 무시한다
-/** 커맨드 패널: 닉네임이 GRD + 이 해시와 맞는 명령어를 입력해야 열림 (비밀번호 자체는 코드에 없음) */
+/** 커맨드 패널: 닉네임이 GRD + 비밀번호 해시가 맞아야 열림 (비밀번호 자체는 코드에 없음) */
 const ADMIN_NAME = "GRD";
-// 해시도 코드에 두지 않음: 환경변수 ADMIN_HASH 또는 data/admin.hash (git에 안 올라감). 없으면 커맨드 패널 꺼짐
-const ADMIN_HASH = (() => {
-  if (process.env.ADMIN_HASH) return process.env.ADMIN_HASH.trim();
-  try {
-    return fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../data/admin.hash"), "utf8").trim();
-  } catch {
-    return "";
-  }
-})();
-const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
+async function sha256(s: string) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /** 게임 중 연결이 끊긴 사람을 기다리는 시간 */
 const RECONNECT_MS = 60_000;
-const PORT = process.argv.includes("--dev") ? 2567 : Number(process.env.PORT ?? 2567);
-const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", process.env.DIST_DIR ?? "dist");
+
+/** 한 연결 (보내기만 하면 됨) */
+export interface Conn {
+  send(data: string): void;
+}
 
 interface Member {
   id: number;
-  ws: WebSocket;
+  conn: Conn;
   /** 이번 게임에서 빠짐 (개발자 도구 감지) — 게임 메시지를 안 받음 */
   out?: boolean;
   /** 커맨드 권한 (접속할 때마다 다시 인증) */
@@ -42,7 +34,7 @@ interface Member {
   chatAt?: number[];
   /** 게임 중 연결이 끊겨 기다리는 중 (60초) */
   dc?: boolean;
-  dcTimer?: NodeJS.Timeout;
+  dcTimer?: ReturnType<typeof setTimeout>;
   name: string;
   color: number;
   cls: ClassId;
@@ -76,7 +68,7 @@ class Room {
   members = new Map<number, Member>();
   /** 로비 미니게임 (양배추 축구) */
   play = new LobbyPlay();
-  private playTimer: NodeJS.Timeout | null = null;
+  private playTimer: ReturnType<typeof setInterval> | null = null;
   hostId = 0;
   /** 원정·보석 쟁탈전: 다 같이 한 판 */
   game: Game | null = null;
@@ -85,8 +77,8 @@ class Room {
   private raceDone = new Set<number>();
   mode: RoomMode = { speedrun: false, gem: false, diff: 2 };
   saveId: string | null = null;
-  private timer: NodeJS.Timeout | null = null;
-  private raceTimer: NodeJS.Timeout | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private raceTimer: ReturnType<typeof setInterval> | null = null;
 
   get inGame() {
     return !!this.game || !!this.race;
@@ -106,17 +98,17 @@ class Room {
     return this.game ?? this.race?.get(id) ?? null;
   }
 
-  constructor(public code: string) {}
+  constructor(public code: string, private onEmpty: () => void) {}
 
   send(m: Member, msg: ServerMsg) {
-    if (m.ws.readyState === WebSocket.OPEN) m.ws.send(JSON.stringify(msg));
+    m.conn.send(JSON.stringify(msg));
   }
 
   broadcast(msg: ServerMsg) {
     const data = JSON.stringify(msg);
     for (const m of this.members.values()) {
       if (m.out && this.inGame) continue;
-      if (m.ws.readyState === WebSocket.OPEN) m.ws.send(data);
+      m.conn.send(data);
     }
   }
 
@@ -145,7 +137,7 @@ class Room {
       this.stopGame();
       if (this.playTimer) clearInterval(this.playTimer);
       this.playTimer = null;
-      rooms.delete(this.code);
+      this.onEmpty();
       return;
     }
     if (!this.inGame) this.sendLobby();
@@ -167,11 +159,11 @@ class Room {
   }
 
   /** 같은 닉네임으로 다시 들어옴 */
-  rejoin(m: Member, ws: WebSocket) {
+  rejoin(m: Member, conn: Conn) {
     if (m.dcTimer) clearTimeout(m.dcTimer);
     m.dcTimer = undefined;
     m.dc = false;
-    m.ws = ws;
+    m.conn = conn;
     m.admin = false;
     this.send(m, { t: "joined", id: m.id, code: this.code });
     const g = this.gameFor(m.id);
@@ -274,7 +266,7 @@ class Room {
         mode: { ...this.mode },
         rawSend: (id: number, data: string) => {
           const m = this.members.get(id);
-          if (m && !m.out && m.ws.readyState === WebSocket.OPEN) m.ws.send(data);
+          if (m && !m.out) m.conn.send(data);
         },
         save,
         saveId: this.saveId ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
@@ -294,7 +286,7 @@ class Room {
         (msg) => this.send(m, msg),
         (_id, msg) => this.send(m, msg),
         () => { this.raceDone.add(m.id); this.sendRace(); this.checkRaceOver(); },
-        { mode: { ...this.mode }, saveId: `race-${m.id}`, hostName: m.name, rawSend: (_id: number, data: string) => { if (m.ws.readyState === WebSocket.OPEN) m.ws.send(data); } },
+        { mode: { ...this.mode }, saveId: `race-${m.id}`, hostName: m.name, rawSend: (_id: number, data: string) => m.conn.send(data) },
       );
       this.race.set(m.id, g);
     }
@@ -333,72 +325,75 @@ class Room {
   }
 }
 
-const rooms = new Map<string, Room>();
-let nextMemberId = 1;
-
-function makeCode() {
-  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  let code = "";
-  do {
-    code = Array.from({ length: 4 }, () => letters[Math.floor(Math.random() * letters.length)]).join("");
-  } while (rooms.has(code));
-  return code;
-}
-
 function cleanName(name: unknown) {
   const s = String(name ?? "").trim().slice(0, 10);
   return s || "무명 용사";
 }
 
-// ---------- HTTP (빌드된 클라이언트 서빙) ----------
-const MIME: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".woff2": "font/woff2",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-};
 
-const server = http.createServer((req, res) => {
-  const url = decodeURIComponent((req.url ?? "/").split("?")[0]);
-  let file = path.join(DIST, url === "/" ? "index.html" : url);
-  if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    file = path.join(DIST, "index.html");
+
+interface ConnState {
+  conn: Conn;
+  host: boolean;
+  room: Room | null;
+  me: Member | null;
+}
+
+/** 방장 브라우저 하나 = 방 하나. 연결이 열리고 메시지가 오고 닫히는 걸 처리 */
+export class Hub {
+  room: Room | null = null;
+  private conns = new Map<number, ConnState>();
+  private nextMemberId = 1;
+  private syncTimer: ReturnType<typeof setInterval>;
+
+  constructor(public code: string, private adminHash: string) {
+    // 참가자 기록 동기화: 바뀐 사람 몫을 2초마다 그 사람에게 보냄 (방장 자신은 자기 저장소라 필요 없음)
+    this.syncTimer = setInterval(() => this.flushSync(), 2000);
   }
-  if (!fs.existsSync(file)) {
-    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-    res.end("양배추 용사단 서버 실행 중. 개발 중에는 http://localhost:5173 으로 접속하세요.");
-    return;
+
+  /** connId: 0 = 방장 자신 */
+  open(connId: number, conn: Conn) {
+    this.conns.set(connId, { conn, host: connId === 0, room: null, me: null });
   }
-  res.writeHead(200, { "content-type": MIME[path.extname(file)] ?? "application/octet-stream" });
-  fs.createReadStream(file).pipe(res);
-});
 
-// ---------- WebSocket ----------
-// 압축: 큰 메시지(스냅샷)만 가볍게 압축해서 터널·와이파이에서도 덜 끊기게
-const wss = new WebSocketServer({
-  server,
-  path: "/ws",
-  perMessageDeflate: { threshold: 512, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: false },
-});
+  close(connId: number) {
+    const c = this.conns.get(connId);
+    this.conns.delete(connId);
+    if (!c?.room || !c.me || c.me.conn !== c.conn) return;
+    if (c.room.inGame) c.room.disconnect(c.me);
+    else c.room.remove(c.me.id);
+  }
 
-wss.on("connection", (ws) => {
-  let room: Room | null = null;
-  let me: Member | null = null;
+  flushSync() {
+    const names = new Set(takeDirty());
+    if (!names.size) return;
+    for (const c of this.conns.values()) {
+      if (c.host || !c.me || !names.has(c.me.name.trim().toLowerCase())) continue;
+      c.conn.send(JSON.stringify({ t: "sync", slice: sliceFor(c.me.name) } satisfies ServerMsg));
+    }
+  }
 
-  const error = (msg: string) => ws.send(JSON.stringify({ t: "error", msg } satisfies ServerMsg));
+  dispose() {
+    clearInterval(this.syncTimer);
+    this.room?.stopGame();
+  }
 
-  ws.on("message", (raw) => {
+  message(connId: number, raw: string) {
+    const c = this.conns.get(connId);
+    if (!c) return;
+    const conn = c.conn;
+    let room = c.room;
+    let me = c.me;
+    const error = (msg: string) => conn.send(JSON.stringify({ t: "error", msg } satisfies ServerMsg));
     let msg: ClientMsg;
     try {
-      msg = JSON.parse(raw.toString());
+      msg = JSON.parse(raw);
     } catch {
       return;
     }
 
     if (msg.t === "ping") {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "pong", c: Number(msg.c) || 0 }));
+      conn.send(JSON.stringify({ t: "pong", c: Number(msg.c) || 0 }));
       return;
     }
 
@@ -406,17 +401,20 @@ wss.on("connection", (ws) => {
       if (room) return;
       let target: Room | undefined;
       if (msg.t === "create") {
-        target = new Room(makeCode());
-        rooms.set(target.code, target);
+        // 방은 방장 브라우저에 하나뿐. 방장(자기 자신 연결)만 만들 수 있음
+        if (!c.host) return error("방을 만들 수 없어요.");
+        if (!this.room) this.room = new Room(this.code, () => { this.room = null; });
+        target = this.room;
       } else {
-        target = rooms.get(String(msg.code).toUpperCase().trim());
+        target = this.room && String(msg.code).toUpperCase().trim() === this.code ? this.room : undefined;
         if (!target) return error("그런 방이 없어요. 방 코드를 확인해 주세요.");
         // 연결이 끊겼던 사람이 같은 닉네임으로 돌아옴
         const back = [...target.members.values()].find((o) => o.dc && o.name === cleanName(msg.name));
         if (back) {
           room = target;
           me = back;
-          target.rejoin(back, ws);
+          c.room = room; c.me = me;
+          target.rejoin(back, conn);
           return;
         }
         if (target.inGame) return error("이미 게임이 진행 중인 방이에요.");
@@ -424,7 +422,10 @@ wss.on("connection", (ws) => {
       }
       room = target;
       const name = cleanName(msg.name);
-      me = { id: nextMemberId++, ws, name, color: 0, cls: "warrior", ready: false, cos: cosFor(name, "warrior") };
+      // v1.9 참가자는 자기 브라우저의 기록(프로필·도감·순위)을 가져옴
+      if (msg.t === "join" && !c.host && msg.slice && typeof msg.slice === "object") mergeSlice(name, msg.slice as Slice);
+      me = { id: this.nextMemberId++, conn, name, color: 0, cls: "warrior", ready: false, cos: cosFor(name, "warrior") };
+      c.room = room; c.me = me;
       room.add(me);
       return;
     }
@@ -526,9 +527,13 @@ wss.on("connection", (ws) => {
         break;
       case "auth": {
         // 닉네임 GRD + 비밀번호가 둘 다 맞아야 열림. 틀리면 그냥 '알 수 없는 명령어'
-        const ok = me.name === ADMIN_NAME && typeof msg.code === "string" && msg.code.length < 64 && !!ADMIN_HASH && sha256(msg.code.trim()) === ADMIN_HASH;
-        if (ok) me.admin = true;
-        room.send(me, ok ? { t: "admin", ok: true } : { t: "toast", msg: "알 수 없는 명령어예요" });
+        const who = me, inRoom = room;
+        const code = typeof msg.code === "string" && msg.code.length < 64 ? msg.code.trim() : "";
+        void (async () => {
+          const ok = who.name === ADMIN_NAME && !!code && !!this.adminHash && (await sha256(code)) === this.adminHash;
+          if (ok) who.admin = true;
+          inRoom.send(who, ok ? { t: "admin", ok: true } : { t: "toast", msg: "알 수 없는 명령어예요" });
+        })();
         break;
       }
       case "cmd":
@@ -584,25 +589,5 @@ wss.on("connection", (ws) => {
         else { me.ready = true; room.sendLobby(); }
         break;
     }
-  });
-
-  ws.on("close", () => {
-    // 이미 새 연결로 돌아온 사람이면 무시
-    if (!room || !me || me.ws !== ws) return;
-    if (room.inGame) room.disconnect(me);
-    else room.remove(me.id);
-  });
-});
-
-// v1.6: 클라우드 기록을 먼저 불러오고 서버 시작
-await initStore();
-server.listen(PORT, () => {
-  console.log(`양배추 용사단 서버: http://localhost:${PORT}  (WebSocket /ws)${cloudOn ? " · 기록 클라우드 저장 켜짐" : ""}`);
-});
-// 업데이트·재시작 때 기록을 바로 저장하고 끄기
-for (const sig of ["SIGTERM", "SIGINT"] as const) {
-  process.on(sig, () => {
-    void flushStore().finally(() => process.exit(0));
-    setTimeout(() => process.exit(0), 4000);
-  });
+  }
 }

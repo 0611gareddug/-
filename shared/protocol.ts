@@ -56,7 +56,8 @@ export type GambleGame = "oddeven" | "roulette" | "card";
 
 export type ClientMsg =
   | { t: "create"; name: string }
-  | { t: "join"; code: string; name: string }
+  /** v1.9 참가할 때 내 브라우저의 기록(프로필·도감·순위)을 방장에게 */
+  | { t: "join"; code: string; name: string; slice?: SliceWire }
   | { t: "class"; cls: ClassId }
   | { t: "ready"; ready: boolean }
   | { t: "mode"; speedrun: boolean; gem?: boolean; descent?: boolean; panic?: boolean; diff: number }
@@ -101,6 +102,14 @@ export type ClientMsg =
   | { t: "chest" }
   /** v1.8 떠도는 상인과 교환 (TRADES 번호) */
   | { t: "trade"; idx: number };
+
+/** v1.9 한 사람 몫의 기록 (프로필·도감·하드코어 해금·순위). 내용은 server/store.ts 의 Slice */
+export interface SliceWire {
+  profile?: unknown;
+  codex?: unknown;
+  clear?: boolean;
+  records?: Leaderboards;
+}
 
 // ---------- 서버 → 클라이언트 ----------
 export interface LobbyPlayer {
@@ -527,6 +536,8 @@ export type ServerMsg =
   | { t: "relics"; options: string[] | null }
   /** v1.5 저주받은 제단: 바쳤는지 */
   | { t: "altarResult"; card: string }
+  /** v1.9 방장이 보낸 내 기록 (내 브라우저에 저장) */
+  | { t: "sync"; slice: SliceWire }
   /** v1.8 떠도는 상인 교환 결과 (left: 남은 교환 횟수) */
   | { t: "tradeResult"; ok: boolean; msg: string; card?: string; left: number; used: string[] }
   /** 보물방 상자 결과 (나에게만) — gold: 얻은 돈, mimic이면 lost: 잃은 돈 */

@@ -16,6 +16,7 @@ import { initGuard } from "./guard";
 import { panicComplete, panicEnd, panicReset, panicSnap, panicStage } from "./panic";
 import { closeModeSelect, initModeSelect, isModeSelectOpen, miniBanner, modeIdOf, openModeSelect } from "./modeSelect";
 import { Net } from "./net";
+import { exportFile, importFile, mergeMine, myRecords, mySlice } from "./localStore";
 import { BODIES, heroPalette, heroRows, heroSkinCanvas, monsterPalette, paint } from "./sprites";
 import { MASTERY_TIERS, SKINS } from "../shared/skins";
 import { paintCard } from "./cardArt";
@@ -198,12 +199,61 @@ function startCountdown(elId: string, seconds: number) {
   }, 1000);
 }
 
-// ---------- 타이틀 ----------
-$("btn-create").onclick = () => net.send({ t: "create", name: myName() });
+// ---------- 타이틀 (v1.9: 서버 없이 — 혼자 하기 / 같이 하기 방 만들기 / 참가) ----------
+let busy = false;
+function titleBusy(on: boolean, text = "") {
+  busy = on;
+  for (const id of ["btn-solo", "btn-create", "btn-join"]) $<HTMLButtonElement>(id).disabled = on;
+  $("title-error").textContent = text;
+}
+$("btn-solo").onclick = async () => {
+  if (busy) return;
+  titleBusy(true, "");
+  try {
+    await net.startHost(false);
+    net.send({ t: "create", name: myName() });
+  } catch (e) {
+    $("title-error").textContent = (e as Error).message;
+  }
+  titleBusy(false, $("title-error").textContent ?? "");
+};
+$("btn-create").onclick = async () => {
+  if (busy) return;
+  titleBusy(true, "방을 여는 중... (처음엔 몇 초 걸려요)");
+  try {
+    await net.startHost(true);
+    net.send({ t: "create", name: myName() });
+    titleBusy(false);
+  } catch (e) {
+    net.close();
+    titleBusy(false, (e as Error).message);
+  }
+};
+async function joinRoom(code: string, name: string, quiet = false) {
+  if (busy) return;
+  titleBusy(true, quiet ? "" : "방장에게 연결하는 중...");
+  try {
+    await net.join(code);
+    net.send({ t: "join", code: code.toUpperCase(), name, slice: mySlice(name) });
+    titleBusy(false);
+  } catch (e) {
+    net.close();
+    titleBusy(false, quiet ? "" : (e as Error).message);
+  }
+}
 $("btn-join").onclick = () => {
   const code = $<HTMLInputElement>("code").value.trim();
   if (code.length !== 4) return ($("title-error").textContent = "방 코드 4글자를 입력해 주세요.");
-  net.send({ t: "join", code, name: myName() });
+  void joinRoom(code, myName());
+};
+$("btn-export").onclick = () => exportFile();
+$("btn-import").onclick = () => $<HTMLInputElement>("import-file").click();
+$<HTMLInputElement>("import-file").onchange = async () => {
+  const f = $<HTMLInputElement>("import-file").files?.[0];
+  if (!f) return;
+  const ok = await importFile(f);
+  toast(ok ? "기록을 불러왔어요" : "기록 파일이 아니에요");
+  $<HTMLInputElement>("import-file").value = "";
 };
 $<HTMLInputElement>("code").onkeydown = (e) => { if (e.key === "Enter") $("btn-join").click(); };
 
@@ -354,8 +404,9 @@ function renderRecords() {
   const box = $("records");
   // 순위는 지금 고른 난이도 것만 (난이도는 모드 선택 창에서)
   const diff = lobbyInfo?.mode.diff ?? 2;
-  const rec = lobbyInfo?.records[String(diff)];
-  $("rec-title").textContent = `순위 · ${diffName(diff)}`;
+  // v1.9: 순위는 내 브라우저에 저장된 '내 기록'
+  const rec = myRecords()[String(diff)];
+  $("rec-title").textContent = `내 기록 · ${diffName(diff)}`;
   box.innerHTML = "";
   if (!rec) return;
   const add = (label: string, names: string, time: string) => {
@@ -1453,6 +1504,10 @@ net.onMessage = async (m: ServerMsg) => {
       if (autoJoin) { autoJoin = false; break; }
       $("title-error").textContent = m.msg;
       break;
+    case "sync":
+      // v1.9 방장이 보내 준 내 기록 → 내 브라우저에 저장
+      mergeMine(myName(), m.slice);
+      break;
     case "joined":
       myId = m.id;
       autoJoin = false;
@@ -1460,7 +1515,9 @@ net.onMessage = async (m: ServerMsg) => {
       reconnectUntil = 0;
       if (scene) scene.myId = myId;
       saveSession();
-      history.replaceState(null, "", `?room=${m.code}`);
+      if (net.mode !== "solo") history.replaceState(null, "", `?room=${m.code}`);
+      else history.replaceState(null, "", location.pathname);
+      document.body.classList.toggle("solo", net.mode === "solo");
       break;
     case "lobby":
       panicReset();
@@ -1675,20 +1732,25 @@ function saveSession() {
 window.addEventListener("pagehide", () => { if (roomCode) saveSession(); });
 
 net.onClose = () => {
-  if (roomCode && stage && (!reconnectUntil || Date.now() < reconnectUntil)) {
+  // 참가자: 방장과 잠깐 끊겼으면 1분 동안 다시 연결 시도
+  if (net.mode === "guest" && !net.hostGone && roomCode && stage && (!reconnectUntil || Date.now() < reconnectUntil)) {
     reconnectUntil ||= Date.now() + 60_000;
-    toast("서버와 연결이 끊겼어요... 다시 연결하는 중");
+    toast("방장과 연결이 끊겼어요... 다시 연결하는 중");
     window.setTimeout(() => net.reconnect(), 1500);
     return;
   }
+  const wasGuest = net.mode === "guest";
   reconnectUntil = 0;
+  net.close();
+  roomCode = "";
   stopGame();
   show("title");
-  $("title-error").textContent = "서버와 연결이 끊겼어요. 새로고침해 주세요.";
+  $("title-error").textContent = net.hostGone ? "방장이 방을 닫았어요." : wasGuest ? "방장과 연결이 끊겼어요. (방장이 나갔거나 인터넷이 끊김)" : "게임이 멈췄어요. 다시 시작해 주세요.";
 };
 net.onReopen = () => {
-  if (roomCode) net.send({ t: "join", code: roomCode, name: myName() });
+  if (roomCode) net.send({ t: "join", code: roomCode, name: myName(), slice: mySlice(myName()) });
 };
+net.onPeers = (n) => toast(n ? `친구 ${n}명 연결됨` : "연결된 친구가 없어요");
 
 // 새로고침했을 때: 1분 안에 같은 방에 있었으면 자동으로 다시 들어감
 try {
@@ -1696,7 +1758,7 @@ try {
   if (saved && saved.code === params.get("room") && Date.now() - saved.at < 70_000) {
     $<HTMLInputElement>("name").value = saved.name;
     autoJoin = true;
-    net.send({ t: "join", code: saved.code, name: saved.name });
+    void joinRoom(saved.code, saved.name, true);
   }
 } catch { /* 무시 */ }
 

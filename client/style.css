@@ -784,3 +784,12 @@ body.panic-shake canvas { animation: pt-cshake 0.1s infinite; }
 .class-group { grid-column: 1 / -1; font-size: 11px; color: var(--legend); border-bottom: 1px solid var(--line); padding: 2px 0; margin-top: 2px; }
 .devtools-guard { position: fixed; inset: 0; z-index: 9999; background: #0b0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #fff; font-family: "Galmuri14", monospace; }
 .devtools-guard b { font-size: 26px; color: #ff5a4a; }
+
+/* v1.9 타이틀: 혼자 하기 / 같이 하기 */
+.btn.big { font-size: 18px; padding: 14px 18px; }
+.title-sep { display: flex; align-items: center; gap: 8px; color: var(--muted, #8a8aa0); font-size: 12px; margin: 6px 0 2px; }
+.title-sep::before, .title-sep::after { content: ""; flex: 1; height: 1px; background: #3a3848; }
+.title-note { font-size: 11px; line-height: 1.5; margin: 0; }
+.title-data { justify-content: center; gap: 8px; }
+/* 혼자 하기: 방 코드 · 초대 · 준비 버튼 숨김 */
+body.solo #btn-copy, body.solo .lobby-head .room-code, body.solo .lobby-head .muted, body.solo #btn-ready { display: none !important; }
