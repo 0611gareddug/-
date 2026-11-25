@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: "client",
+  // 상대 경로: Render(주소 맨 앞)와 GitHub Pages(/저장소이름/ 아래) 둘 다에서 열리게
+  base: "./",
   build: { outDir: "../dist", emptyOutDir: true },
   server: {
     port: 5173,

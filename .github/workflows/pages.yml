@@ -1,0 +1,45 @@
+# GitHub Pages: 게임 화면만 Pages에 올리고, 실시간 서버는 Render에 연결
+# (저장소 Settings → Pages → Source 를 "GitHub Actions" 로)
+# 서버 주소를 바꾸려면 Settings → Secrets and variables → Actions → Variables 에 SERVER_URL 추가
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --include=dev
+      - run: npm run build
+        env:
+          VITE_SERVER_URL: ${{ vars.SERVER_URL || 'https://yangbaechu-yongsadan.onrender.com' }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
